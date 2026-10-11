@@ -135,7 +135,10 @@ paths:
       instruction, reset, interrupt — `#opStep.done`) or `#breakAt` fires on any CPU.
       Gives up at `MAX_OP_EDGES` (4096) or `OP_STEP_BUDGET_MS` (500 ms), and at once
       with no ticking clock and no `wakeAt` (a manual clock is the user's). Returns
-      whether it reached a start. Forwarded to the Worker (`CALLS`). A microstep mode
+      whether it reached a start. A CPU WAITING (`waiting`: the Z80 halted, the 6502
+      in WAI/STP) starts nothing until an interrupt, so there a Step is ONE bus cycle
+      (`idleFrom`, the track's cycle count) — it used to burn the whole budget, the
+      board run ~2000 clocks per press. Forwarded to the Worker (`CALLS`). A microstep mode
       (one counted edge) and a forecast of the whole instruction (`planOperation`)
       were built and REMOVED (Jason, 2026-10-10): the cores emulate results, not the
       silicon's cycle-by-cycle insides — see ui-chrome.md "CPU monitor".
@@ -151,8 +154,19 @@ paths:
     - **`stepOverCpu(compId)`** — Step Over, offered at a call (the descriptor's
       `isCall`: a 6502 JSR; a Z80 CALL, CALL cc, RST). The stop is `{ret, sp, mask}`:
       an instruction START at the return address with the stack no deeper than the
-      call found it (`returned()` — `spOf`/`spMask`, the COMMITTED pointer, compared
-      within its width), so a recursive call's inner return does not count. First
+      call found it (`returned()` — `spOf`/`spMask`, the COMMITTED pointer; "shallower"
+      only within `SHALLOW_SLACK`, so a 6502 recursion over half a page deep does not
+      wrap round to read as shallow), so a recursive call's inner return does not count — OR
+      (`#cameBack`) where a routine that skips its inline arguments (`JSR PRIMM /
+      .byte …`, an RST that steps its return address) comes back: an instruction start
+      within `MAX_INLINE_BYTES` past the return address, the stack EXACTLY where the
+      call found it, straight after a TAKEN subroutine return (`isReturn`: RTS; RET,
+      RET cc — never RTI/RETI/RETN), and not the return of a call ending right there.
+      Such a routine has popped its return address, so inside it the stack is at the
+      call's level too: a nested call's RET, or a RET cc not taken, must not stop it
+      (they did once — 2026-10-11). The cheap tests run first; memory is read only
+      when they pass. A routine that leaves by a jump is not seen (runs on to Pause). A redundant DD/FD is part of the instruction it prefixes, in the
+      core and the disassembler alike (`isCall` looks past it). First
       the Step's loop (`#runCpuStep`, up to `MAX_OVER_EDGES` inside the same 500 ms
       budget); a call that outlasts it is HANDED TO THE RUN: `#overStop` is armed (a
       breakpoint of one use, checked in `#observeCpus`, hit → `#breakHit` with

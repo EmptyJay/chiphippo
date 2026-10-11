@@ -184,6 +184,8 @@ export function w65c21Unit(pins) {
         cb2: H, // CB2 handshake/pulse output level
         ca2pulse: false, // a pulse-mode low is active, restore next cycle
         cb2pulse: false,
+        cb2arm: false, // a Port B write: CB2 goes low at the next PHI2 rise
+        cb2restore: false, // a deselected E pulse seen: high at the next rise
       };
     },
 
@@ -221,16 +223,31 @@ export function w65c21Unit(pins) {
         next.crb |= 0x40;
       }
 
-      // A one-cycle CA2/CB2 pulse from the PREVIOUS cycle ends on this PHI2
-      // fall whether or not the chip is selected ("restore on the next E").
+      // A CA2/CB2 strobe keeps the 6821's edges, which the W65C21 keeps.
+      // CA2 (the READ strobe) runs on E's FALL: low on the fall that reads
+      // PRA, high on the first fall the chip is DESELECTED for — a chip still
+      // selected (the 65C02's read-modify-write reading PRA twice) holds it
+      // low. CB2 (the WRITE strobe) runs on E's RISE: low on the rise after
+      // the write to PRB, high on the rise after an E pulse during which the
+      // chip was deselected. (Unlike the VIA's one-cycle pulse, which restores
+      // on the next fall whatever is selected.)
       const phi2Fell = prev && fell(was(phi2), ins.get(phi2));
-      if (phi2Fell && state.ca2pulse) {
+      const phi2Rose = prev && rose(was(phi2), ins.get(phi2));
+      const deselectFall = phi2Fell && !selected(ins);
+      if (deselectFall && state.ca2pulse) {
         next.ca2 = H;
         next.ca2pulse = false;
       }
-      if (phi2Fell && state.cb2pulse) {
+      if (phi2Rose && state.cb2arm) {
+        next.cb2 = L;
+        next.cb2arm = false;
+      } else if (phi2Rose && state.cb2restore) {
         next.cb2 = H;
         next.cb2pulse = false;
+        next.cb2restore = false;
+      }
+      if (deselectFall && state.cb2pulse && !state.cb2arm) {
+        next.cb2restore = true;
       }
 
       // ── Bus transaction: commit on PHI2's falling edge while selected ───────
@@ -249,9 +266,11 @@ export function w65c21Unit(pins) {
           else if (reg === "cra") next.cra = (state.cra & 0xc0) | (data & 0x3f);
           else if (reg === "prb") {
             next.orb = data;
-            // A write to Peripheral B raises the CB2 handshake / pulse.
+            // A write to Peripheral B raises the CB2 handshake / pulse —
+            // low at the NEXT rise of PHI2 (`cb2arm`).
             if (b(state.crb, 5) && !b(state.crb, 4)) {
-              next.cb2 = L;
+              next.cb2arm = true;
+              next.cb2restore = false;
               if (b(state.crb, 3)) next.cb2pulse = true; // pulse mode
             }
           } else if (reg === "ddrb") next.ddrb = data;

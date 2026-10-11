@@ -77,5 +77,16 @@ test("every page carries a Content-Security-Policy", () => {
       /http-equiv="Content-Security-Policy"[\s\S]*?script-src\s+'self';/,
       `${page} has no CSP`,
     );
+    // No plugins, no <base> to re-point every relative URL, no form posting
+    // anywhere — none is used, so none is allowed.
+    const csp = /http-equiv="Content-Security-Policy"\s+content="([^"]*)"/.exec(html)?.[1] ?? ""; // prettier-ignore
+    for (const rule of [
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'none'",
+    ]) {
+      // prettier-ignore
+      assert.match(csp.replace(/\s+/g, " "), new RegExp(rule), `${page}: ${rule}`);
+    }
   }
 });

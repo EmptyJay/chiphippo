@@ -104,6 +104,11 @@ const DARLINGTON =
   "a ULN2003A channel is a switch to the logic engine and a Darlington " +
   "under Spice Lite, a volt above E when on — and the relay it drives " +
   "follows its coil's current";
+const PASSIVE =
+  "a capacitor joins nothing and a coil is a wire to the logic engine; " +
+  "under Spice Lite one stores charge and the other carries current, so an " +
+  "LED fades, a Schmitt input trips late and a coil rings " +
+  "(tests/spice-rlc-examples.test.js holds each to its closed form)";
 const EXEMPT = new Map([
   ["NE555 Astable example", SILICON],
   ["NE555 Monostable example", SILICON],
@@ -116,27 +121,50 @@ const EXEMPT = new Map([
   ["relay Transistor driver example", RELAY],
   ["relay No flyback diode example", RELAY],
   ["ULN2003A Relay driver example", DARLINGTON],
+  ["cap-electrolytic Fade example", PASSIVE],
+  ["cap-electrolytic Timer example", PASSIVE],
+  ["inductor Ringing example", PASSIVE],
 ]);
 
 const TICKS = 24;
 const STEP_S = 0.005;
+/** A desk whose ROM ships a program (the CPUs' computers) runs long enough
+    for the program to do something: set its VIA's ports up, send the LCD its
+    commands and type the first letter — not just reset reading a blank ROM.
+    Every level, state and warning of every tick is compared; the settle's
+    PASS COUNT is not, over a run this long: Spice Lite steps only the chips
+    on the islands a tick reaches (features/12), so a tick that reaches a
+    quiet island's edge can settle in a pass fewer, to the same levels. */
+const PROGRAM_TICKS = 1600;
 
-/** Every desktop of every shipped example, labelled. */
+/** Every desktop of every shipped example, labelled, with the ROM images it
+    ships (compId → bytes, as the engine reads them; empty for most). */
 function examples() {
   const out = [];
   for (const file of readdirSync(DEMOS).filter((f) => f.endsWith(".json"))) {
     const payload = JSON.parse(readFileSync(DEMOS + file, "utf8"));
     const ref = file.replace(/\.json$/, "");
-    for (const { name, doc } of exampleDesktops(ref, payload)) {
-      out.push({ name, doc });
+    for (const { name, doc, images } of exampleDesktops(ref, payload)) {
+      out.push({ name, doc, images: imagesFor(doc, images) });
     }
   }
   return out;
 }
 
-/** Run one engine over a desk for TICKS ticks: clocks toggling every tick,
+/** A desktop's shipped images (`{guid: base64}`) keyed by the chip holding
+    each guid. */
+function imagesFor(doc, images) {
+  const out = new Map();
+  for (const c of doc.components) {
+    const encoded = images?.[c.params?.storage?.guid];
+    if (encoded) out.set(c.id, new Uint8Array(Buffer.from(encoded, "base64")));
+  }
+  return out;
+}
+
+/** Run one engine over a desk for `ticks` ticks: clocks toggling every tick,
     simulated time advancing, state carried exactly as SimController does. */
-function run(engine, doc) {
+function run(engine, doc, images = new Map(), ticks = TICKS) {
   const netlist = buildNetlist(doc);
   const clocks = doc.components.filter(
     (c) => c.kind === "clock" || isOscillator(partDef(c.ref)),
@@ -146,7 +174,7 @@ function run(engine, doc) {
   let prev = new Map();
   let analog = new Map();
   const results = [];
-  for (let i = 0; i < TICKS; i++) {
+  for (let i = 0; i < ticks; i++) {
     const level = i % 2 === 0 ? H : L;
     const r = engine.tick({
       document: doc,
@@ -156,6 +184,7 @@ function run(engine, doc) {
       prevPinLevels: prev,
       clockPhase: new Map(clocks.map((c) => [c.id, level])),
       now: i * STEP_S,
+      images,
       spice: engine === ENGINES.spice ? { config: null, analog } : undefined,
     });
     warm = r.netLevels;
@@ -173,14 +202,24 @@ test("engine parity: the shipped examples are found", () => {
   assert.ok(all.length > 50, `${all.length} example desktops`);
 });
 
-for (const { name, doc } of all) {
+for (const { name, doc, images } of all) {
   if (EXEMPT.has(name)) continue;
   test(`engine parity: ${name} runs identically on both engines`, () => {
-    const digital = run(ENGINES.digital, doc);
-    const spice = run(ENGINES.spice, doc);
-    for (let i = 0; i < TICKS; i++) {
+    const ticks = images.size ? PROGRAM_TICKS : TICKS;
+    const digital = run(ENGINES.digital, doc, images, ticks);
+    const spice = run(ENGINES.spice, doc, images, ticks);
+    if (images.size) {
+      // The program ran: its LCD shows the greeting's first letter.
+      const lcd = [...digital.at(-1).state.values()].find((s) => s?.ddram);
+      assert.equal(
+        String.fromCharCode(lcd?.ddram[0] ?? 0),
+        "H",
+        "the program typed",
+      );
+    }
+    for (let i = 0; i < ticks; i++) {
       for (const key of SHARED) {
-        if (key === "iterations" && hasSilicon(doc)) continue;
+        if (key === "iterations" && (hasSilicon(doc) || images.size)) continue;
         assert.deepEqual(
           comparable(doc, key, spice[i][key]),
           comparable(doc, key, digital[i][key]),
@@ -234,6 +273,70 @@ test(`engine parity: allowed to differ — ${WIRED_AND}`, () => {
   };
   assert.deepEqual(at(ENGINES.digital), { level: X, conflict: true });
   assert.deepEqual(at(ENGINES.spice), { level: L, conflict: false });
+});
+
+test("engine parity: a diode leading OUT of a wired-AND is no driver of it", () => {
+  // The first test's wired-AND (an X unit beside a sinking one, pulled up),
+  // feeding out through a diode — its anode on the net — into 10 kΩ to
+  // ground: it can only sink, so the net is still the LOW's and no fight.
+  const b = bench();
+  const u = b.seat("u1", "74LS05", "e10");
+  b.vcc(u.get(14));
+  b.gnd(u.get(7));
+  b.vcc(u.get(3));
+  const ra = b.seat("ra", "resistor", "a40", { ohms: 10e3 });
+  const rb = b.seat("rb", "resistor", "a50", { ohms: 3.3e3 });
+  b.vcc(ra.get(1));
+  b.link(ra.get(2), u.get(1));
+  b.link(rb.get(1), u.get(1));
+  b.gnd(rb.get(2));
+  b.link(u.get(2), u.get(4));
+  const rp = b.seat("rp", "resistor", "a30", { ohms: 1e3 });
+  b.vcc(rp.get(1));
+  b.link(rp.get(2), u.get(2));
+  const d = b.seat("d1", "diode", "a20");
+  b.link(d.get(1), u.get(4)); // anode on the wired-AND
+  const rl = b.seat("rl", "resistor", "a60", { ohms: 10e3 });
+  b.link(d.get(2), rl.get(1));
+  b.gnd(rl.get(2));
+  const netlist = buildNetlist(b.doc, new Map(), { inductors: "branch" });
+  const net = netlist.netOfPoint.get(b.at(u.get(2)));
+  const r = run(ENGINES.spice, b.doc)[TICKS - 1];
+  assert.equal(r.netLevels.get(net), L);
+  assert.equal(
+    r.warnings.some((w) => w.type === "conflict"),
+    false,
+  );
+
+  // A ZENER the same way round, its cathode on the 5 V rail through 1 kΩ,
+  // breaks down into the net — a milliamp the LOW sinks with the net still
+  // under VIL: a way in the outputs cannot see, so the rule stands aside.
+  const z = bench();
+  const zu = z.seat("u1", "74LS05", "e10");
+  z.vcc(zu.get(14));
+  z.gnd(zu.get(7));
+  z.vcc(zu.get(3));
+  const zra = z.seat("ra", "resistor", "a40", { ohms: 10e3 });
+  const zrb = z.seat("rb", "resistor", "a50", { ohms: 3.3e3 });
+  z.vcc(zra.get(1));
+  z.link(zra.get(2), zu.get(1));
+  z.link(zrb.get(1), zu.get(1));
+  z.gnd(zrb.get(2));
+  z.link(zu.get(2), zu.get(4));
+  const zrp = z.seat("rp", "resistor", "a30", { ohms: 1e3 });
+  z.vcc(zrp.get(1));
+  z.link(zrp.get(2), zu.get(2));
+  const zd = z.seat("d1", "zener", "a20", { zenerVolts: 3.3 });
+  z.link(zd.get(1), zu.get(4)); // anode on the wired-AND
+  const zk = z.seat("rk", "resistor", "a60", { ohms: 1e3 });
+  z.vcc(zk.get(1));
+  z.link(zk.get(2), zd.get(2)); // cathode to 5 V through it
+  const zr = run(ENGINES.spice, z.doc)[TICKS - 1];
+  assert.equal(
+    zr.warnings.some((w) => w.type === "conflict"),
+    true,
+    "a Zener's anode is a way in",
+  );
 });
 
 test("engine parity: the wired-AND rule stands aside where more than open collectors meet", () => {

@@ -454,6 +454,16 @@ test("keepRunEdits saves a ROM's run bytes as Save does, and reloads its inspect
   );
 });
 
+test("keepRunEdits flags nothing when its desk has gone by the time the write comes back", async () => {
+  resetDom();
+  const { calls } = install({ files: new Map([[GUID, new Uint8Array(8192)]]) });
+  const { bridge, controller } = makeBridge({ comp: rom({ storage: { guid: GUID } }) }); // prettier-ignore
+  const kept = await bridge.keepRunEdits("c1", new Uint8Array([1]), { stillHere: () => false }); // prettier-ignore
+  assert.equal(kept, false, "not said to be kept");
+  assert.deepEqual(calls.write, [[GUID, [1]]], "the bytes were written");
+  assert.deepEqual(controller.calls, [], "but no chip on the desk there NOW is flagged"); // prettier-ignore
+});
+
 test("keepRunEdits refuses while running, and an SRAM has nothing to keep", async () => {
   resetDom();
   install({ files: new Map([[GUID, new Uint8Array(8192)]]) });

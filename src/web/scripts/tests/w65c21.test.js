@@ -35,6 +35,7 @@ const PB = [10, 11, 12, 13, 14, 15, 16, 17];
 const D = [33, 32, 31, 30, 29, 28, 27, 26]; // D0…D7
 const CA1 = 40;
 const CA2 = 39;
+const CB2 = 19;
 const RS0 = 36;
 const RS1 = 35;
 const CS0 = 22;
@@ -209,11 +210,27 @@ test("Port B reads ORB for output lines and the pin for input lines", () => {
   assert.equal(v & 0x0f, 0x0c); // input lines read the pins
 });
 
-test("CA2 pulse mode: low for the cycle after a Port A read, then high — selected or not", () => {
+test("CB2 write strobe: low on the PHI2 RISE after a Port B write, high on the rise after a deselected cycle", () => {
+  const pia = new Pia();
+  pia.write(1, 1, 0x2c); // CRB: CB2 output, pulse (b5 b4 b3 = 101), PRB (b2)
+  pia.write(1, 0, 0xaa); // the write latches on the fall…
+  assert.equal(pia.port(CB2), H, "…and CB2 waits for E to rise");
+  pia.deselect().set(PHI2, H).tick();
+  assert.equal(pia.port(CB2), L, "low on the next rise");
+  pia.set(PHI2, L).tick(); // that E pulse: deselected
+  assert.equal(pia.port(CB2), L, "still low through the fall");
+  pia.set(PHI2, H).tick();
+  assert.equal(pia.port(CB2), H, "high on the rise after it");
+});
+
+test("CA2 pulse mode: low after a Port A read until the first deselected PHI2 fall", () => {
   const pia = new Pia();
   pia.write(0, 1, 0x2c); // CRA: CA2 output, pulse (b5 b4 b3 = 101), PRA (b2)
   pia.read(0, 0);
   assert.equal(pia.port(CA2), L, "the pulse");
+  // Still selected, if for another register (CRA): held low.
+  pia.read(0, 1);
+  assert.equal(pia.port(CA2), L, "a selected cycle keeps it low");
   pia.deselect().set(PHI2, H).tick().set(PHI2, L).tick(); // another chip's cycle
-  assert.equal(pia.port(CA2), H, "restored on the next PHI2 fall");
+  assert.equal(pia.port(CA2), H, "restored on the deselected PHI2 fall");
 });

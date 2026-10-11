@@ -27,6 +27,9 @@ import assert from "node:assert/strict";
 import { disassemble6502 } from "../sim/disasm-6502.js";
 import { disassembleZ80 } from "../sim/disasm-z80.js";
 import { W65C02_OPCODES } from "../sim/w65c02.js";
+import { execInstruction, initialRegs } from "../sim/z80-ops.js";
+import { partDef } from "../catalog/index.js";
+import { cpuOf } from "../sim/cpu-monitor.js";
 
 /** A reader over `bytes` placed at `org`; null outside them. */
 const reader =
@@ -182,13 +185,79 @@ test("Z80: DD/FD index the HL forms", () => {
   assert.equal(lineZ80([0xdd, 0xe9]).text, "JP (IX)");
   assert.equal(lineZ80([0xfd, 0xe5]).text, "PUSH IY");
   assert.equal(lineZ80([0xdd, 0x7c]).text, "LD A,IXH");
-  // A prefix with nothing to index is a NOP of its own.
+  // A prefix with nothing to index is run through, as the core runs it: ONE
+  // instruction, the prefix in its length, marked.
   const lone = lineZ80([0xdd, 0x00]);
   assert.equal(lone.text, "NOP");
-  assert.equal(lone.length, 1);
+  assert.equal(lone.length, 2);
   assert.equal(lone.illegal, true);
-  assert.equal(lineZ80([0xdd, 0xc9]).length, 1, "RET is not indexed");
-  assert.equal(lineZ80([0xdd, 0xeb]).length, 1, "EX DE,HL is not indexed");
+  assert.equal(lineZ80([0xdd, 0x41]).text, "LD B,C");
+  assert.equal(lineZ80([0xdd, 0xc9]).length, 2, "RET is not indexed");
+  assert.equal(lineZ80([0xdd, 0xeb]).text, "EX DE,HL", "nor EX DE,HL");
+  const call = lineZ80([0xdd, 0xcd, 0x34, 0x12]);
+  assert.deepEqual([call.text, call.length], ["CALL $1234", 4]);
+  // A relative jump counts the prefix: DD JR $+0 lands after all three bytes.
+  assert.equal(lineZ80([0xfd, 0x18, 0x00]).text, "JR $0003");
+  // A chain: the last prefix decides; ED ignores them.
+  const chain = lineZ80([0xdd, 0xfd, 0x21, 0x00, 0x40]);
+  assert.deepEqual([chain.text, chain.length, chain.illegal], ["LD IY,$4000", 5, true]); // prettier-ignore
+  const ed = lineZ80([0xdd, 0xed, 0xb0]);
+  assert.deepEqual([ed.text, ed.length], ["LDIR", 3]);
+  assert.equal(
+    lineZ80(Array(20).fill(0xdd)).length,
+    8,
+    "a line ends somewhere",
+  );
+});
+
+test("Z80: every line is as long as the core runs it, prefixes and chains included", () => {
+  // What PC the core moves past one instruction at $1000 (operands 05 06 07,
+  // so no jump lands on its own length by chance).
+  const ran = (bytes) => {
+    const mem = new Uint8Array(0x10000);
+    mem.set(bytes, 0x1000);
+    const c = { ...initialRegs(), pc: 0x1000, sp: 0x8000, b: 0, c: 0 };
+    const at = (a) => mem[a];
+    execInstruction(c, { fetch: at, read: at, write() {}, in: () => 0, out() {}, intAck: () => 0, internal() {} }); // prettier-ignore
+    return (c.pc - 0x1000) & 0xffff;
+  };
+  // Control flow moves PC elsewhere, and a block repeat goes back over itself.
+  const flows = /^(JP|JR|CALL|RETI?|RETN|RST|DJNZ|HALT|LDIR|CPIR|INIR|OTIR|LDDR|CPDR|INDR|OTDR)\b/; // prettier-ignore
+  const off = [];
+  const check = (bytes) => {
+    const l = lineZ80([...bytes, 0x05, 0x06, 0x07], 0x1000);
+    if (!flows.test(l.text) && l.length !== ran(bytes)) off.push(`${bytes.map((b) => b.toString(16)).join(" ")}: ${l.text}`); // prettier-ignore
+  };
+  for (let op = 0; op < 256; op++) {
+    check([op]);
+    check([0xcb, op]);
+    check([0xed, op]);
+    for (const p of [0xdd, 0xfd]) {
+      check([p, op]);
+      check([p, 0xcb, 0x05, op]);
+      for (const q of [0xdd, 0xfd, 0xed]) check([p, q, op]);
+    }
+  }
+  assert.deepEqual(off, []);
+});
+
+test("Z80: a prefixed CALL is still a call — Step Over is offered", () => {
+  const z80 = cpuOf(partDef("Z80A"));
+  assert.equal(z80.isCall(lineZ80([0xdd, 0xcd, 0x34, 0x12])), true);
+  assert.equal(z80.isCall(lineZ80([0xcd, 0x34, 0x12])), true);
+  assert.equal(z80.isCall(lineZ80([0xdd, 0x21, 0x00, 0x40])), false);
+  assert.equal(z80.isCall(lineZ80([0xdd, 0xed, 0x44])), false, "NEG");
+});
+
+test("a subroutine's return, never an interrupt's — what Step Over looks back at", () => {
+  const z80 = cpuOf(partDef("Z80A"));
+  assert.equal(z80.isReturn(lineZ80([0xc9])), true, "RET");
+  assert.equal(z80.isReturn(lineZ80([0xc0])), true, "RET NZ");
+  assert.equal(z80.isReturn(lineZ80([0xed, 0x4d])), false, "RETI");
+  assert.equal(z80.isReturn(lineZ80([0xed, 0x45])), false, "RETN");
+  const w65 = cpuOf(partDef("W65C02"));
+  assert.equal(w65.isReturn(line6502([0x60])), true, "RTS");
+  assert.equal(w65.isReturn(line6502([0x40])), false, "RTI");
 });
 
 test("Z80: DDCB/FDCB take the displacement before the opcode", () => {

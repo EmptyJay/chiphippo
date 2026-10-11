@@ -58,7 +58,7 @@ const CATALOG_URL = pathToFileURL(
 
 /** Main's own rule for a part ref it will resolve to `<dir>/<ref>.pdf`
     (main.js PINOUT_REF_RE) — restated because a copy that drifts fails here. */
-const REF_RE = /^[a-z0-9][a-z0-9-]{1,11}$/i;
+const REF_RE = /^[a-z0-9][a-z0-9-]{1,23}$/i;
 
 test("every source key is a real catalog part id", async () => {
   const { PALETTE_DEFS } = await import(CATALOG_URL);
@@ -74,6 +74,14 @@ test("every source key is a real catalog part id", async () => {
 test("every source key is a ref main will resolve to a PDF path", () => {
   const bad = Object.keys(DATASHEET_SOURCES).filter((ref) => !REF_RE.test(ref));
   assert.deepEqual(bad, [], `part ids main's <ref>.pdf lookup rejects: ${bad}`);
+});
+
+test("every catalog part id is a ref main will open a pin-assignments window for", async () => {
+  // A ref the rule refuses is a part whose Pin Assignment item does nothing —
+  // and whose example, on that window, can never be opened.
+  const { PALETTE_DEFS } = await import(CATALOG_URL);
+  const bad = PALETTE_DEFS.map((def) => def.id).filter((id) => !REF_RE.test(id)); // prettier-ignore
+  assert.deepEqual(bad, [], `part ids main's pinout rule rejects: ${bad}`);
 });
 
 test("every source resolves to a PDF inside its own library", () => {

@@ -171,7 +171,6 @@ export function cpuSummary({
   memAt = null,
   breaks = [],
 }) {
-  // prettier-ignore
   if (!state) return null;
   const view = cpu.view(state, ins);
   const pc = cpu.pcOf(state);
@@ -210,7 +209,6 @@ export function cpuSummary({
         entries: Array.from(
           { length: Math.max(0, Math.min(STACK_LINES, top.count)) },
           (_, i) => {
-            // prettier-ignore
             const a = (top.top + i * top.width) & 0xffff;
             const lo = read(a);
             if (top.width === 1 || lo == null) return { addr: a, value: lo };

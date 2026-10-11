@@ -459,13 +459,40 @@ function forgetProject(filePath) {
  *
  * @returns {object|null} the meta to boot onto, or null if the slot is unreadable.
  */
-function recoveryBoot(peeked, upgraded) {
+function recoveryBoot(peeked, upgraded, notes = []) {
   const store = getProjectStore();
   const target = peeked.recoveryFor;
-  const meta = safeCall("project:boot:recovery", () =>
-    store.read(store.defaultProjectPath),
-  );
-  if (!meta) return null;
+  let meta = null;
+  try {
+    meta = store.read(store.defaultProjectPath);
+  } catch (err) {
+    // NOT READ is not unreadable: an I/O failure (a damaged file reads as
+    // null, set aside by io.readJSON) says nothing about the work in it,
+    // which may be the only copy. It is moved aside, never deleted — and if
+    // even that fails, HELD where it is (nothing this session writes or
+    // removes it; the next launch reads it again). Either way the user is
+    // told where it is.
+    console.error("[main] project:boot:recovery error:", err && err.message);
+    const aside = safeCall("project:boot:recovery-aside", () =>
+      store.setAsideDefaultProject(),
+    );
+    if (aside) {
+      notes.push(
+        `The work recovered from your last session could not be read. It is kept at ${aside}.`,
+      );
+    } else {
+      store.holdDefaultProject();
+      notes.push(
+        `The work recovered from your last session could not be read, and is left at ${store.defaultProjectPath} to try again next time. Until then, save this project with Save As.`,
+      );
+    }
+    return null;
+  }
+  if (!meta) {
+    // Unreadable (or gone between the peek and the read): nothing to offer.
+    safeCall("project:boot:recovery-drop", () => store.removeDefaultProject());
+    return null;
+  }
   establishPath(store.defaultProjectPath);
   const name = peeked.name || nameFromFile(target);
   // A recovery names a file no dialog mediated THIS launch, so the sandboxed
@@ -510,6 +537,15 @@ function recoveryBoot(peeked, upgraded) {
  *     project is created — blank name, blank location, one empty desktop.
  */
 function bootProject() {
+  // What the boot has to say beyond the project it opens (a recovery it could
+  // not read), ahead of anything the project brings itself.
+  const notes = [];
+  const meta = openBootProject(notes);
+  if (notes.length) meta.warnings = [...notes, ...(meta.warnings ?? [])];
+  return meta;
+}
+
+function openBootProject(notes) {
   const store = getProjectStore();
   store.ensureSaves();
   // First launch after the single-file redesign: the slot may still hold a v3
@@ -526,10 +562,10 @@ function bootProject() {
   // discards would already have overwritten the real project's ROM files.
   const peeked = safeCall("project:boot:peek", () => store.peekRecovery());
   if (peeked?.recoveryFor) {
-    const recovered = recoveryBoot(peeked, upgraded);
+    // Null when there is nothing to offer (recoveryBoot has dealt with the
+    // slot): the boot goes on as if there had been no recovery.
+    const recovered = recoveryBoot(peeked, upgraded, notes);
     if (recovered) return recovered;
-    // Its own file has gone AND the recovery is unreadable: nothing to offer.
-    safeCall("project:boot:recovery-drop", () => store.removeDefaultProject());
   } else if (store.hasDefaultProject()) {
     const meta = safeCall("project:boot", () =>
       store.read(store.defaultProjectPath),
@@ -933,8 +969,11 @@ const pinoutWindows = new Map(); // part ref → BrowserWindow
 // What a CUSTOM chip's window shows (pinout-chip.js), by ref, while it is
 // open: the app window says it at the open and again whenever it changes.
 const pinoutChips = new Map();
-// Catalog ids: chips ("74LS00"), discretes ("sw-slide", "led"), bricks ("psu").
-const PINOUT_REF_RE = /^[a-z0-9][a-z0-9-]{1,11}$/i;
+// Catalog ids: chips ("74LS00"), discretes ("sw-slide", "cap-electrolytic"),
+// bricks ("psu"). Up to 24 characters — twelve refused "cap-electrolytic", so
+// its pin-assignments window (and the example on it) never opened;
+// tests/datasheet-sources.test.js holds every catalog id to this rule.
+const PINOUT_REF_RE = /^[a-z0-9][a-z0-9-]{1,23}$/i;
 // The narrowest a pin-assignments window may be dragged — every one of them,
 // whatever it lists. Below this the pin rows stop reading as rows (see the
 // window's own sizing below).
@@ -1214,6 +1253,9 @@ function requestDemoImport(ref) {
 // it is its own renderer it talks to the main renderer only THROUGH main — the
 // two `memory:to-*` relays below are that pipe.
 const memoryWindows = new Map(); // component id → BrowserWindow
+// component id → the guid of the chip its window shows, as the app last told
+// it (the relayed `context`): the one file that window may read (ipc-guard).
+const memoryGuids = new Map();
 const MEM_COMP_RE = /^c[0-9]{1,6}$/i; // component ids are `c<n>`
 // A crypto.randomUUID() the renderer minted for a memory chip. Anchored so a
 // value with path separators / `..` can never reach the filesystem.
@@ -1346,7 +1388,9 @@ function openMemoryWindow(compId, ref) {
     })
     .catch(() => {});
   win.on("closed", () => {
-    if (memoryWindows.get(compId) === win) memoryWindows.delete(compId);
+    if (memoryWindows.get(compId) !== win) return;
+    memoryWindows.delete(compId);
+    memoryGuids.delete(compId);
   });
   memoryWindows.set(compId, win);
   return true;
@@ -1612,6 +1656,7 @@ function installUpdate() {
   updater.quitAndInstall(() => {
     closeGuard.installFailed();
     sendToMain("app:close-aborted");
+    sendToMain("updater:install-failed");
   });
 }
 
@@ -2091,8 +2136,12 @@ function identifySender(sender) {
   return {
     isApp: is(mainWindow),
     memoryCompId,
+    memoryGuid: memoryCompId ? (memoryGuids.get(memoryCompId) ?? null) : null,
     isChipDesigner: is(chipDesignerWindow),
     isCpuMonitor: is(cpuMonitorWindow),
+    isPinout: [...pinoutWindows.values()].some(is),
+    isDocs: is(docsWindow),
+    isSerialLog: serialIpc?.isLogWindow(sender) === true,
   };
 }
 
@@ -2524,6 +2573,10 @@ function registerIpc() {
     openMemoryWindow(compId, ref),
   );
   ipcMain.handle("memory:to-inspector", (_event, compId, msg) => {
+    // The chip a window is told it shows is the chip whose file it may read.
+    if (msg?.kind === "context" && memoryWindows.has(compId)) {
+      memoryGuids.set(compId, typeof msg.guid === "string" ? msg.guid : null);
+    }
     relayToInspector(compId, msg);
     return true;
   });

@@ -1055,7 +1055,9 @@ free-running clock and timed part moves on with the CPU, exactly as the main
 subroutine: a 6502 <code>JSR</code>, or a Z80 <code>CALL</code>, <code>CALL cc</code> or <code>RST</code>. It runs the
 whole subroutine and pauses at the instruction after the call, once the stack
 is back where the call found it (so a recursive call returning to the same
-place does not stop it early). A breakpoint inside the subroutine stops it
+place does not stop it early). A subroutine that reads data placed right after
+the call and returns past it stops where it returns to. A breakpoint inside the
+subroutine stops it
 there. A short call is run at once, like a step. A long one, such as a delay
 loop, carries on as a normal run at the circuit&#39;s own speed, and pauses when
 the call returns; press <strong>Pause</strong> to give up on it where it is. The return
@@ -1186,11 +1188,12 @@ reset button and let go to watch it again; open the
 <ul>
 <li><strong><code>W65C02 example</code></strong> — the ROM fills <code>$8000</code>–<code>$FFFF</code> and the VIA sits in the
 low half, split by one 74LS04 on <code>A15</code>. The clock runs at 100 Hz.</li>
-<li><strong><code>Z80A example</code></strong> — the ROM fills <code>$0000</code>–<code>$7FFF</code> and needs no glue logic:
-<code>A15</code> is its chip enable and <code>/RD</code> its output enable. The VIA sits in the
-Z80&#39;s I/O space, selected by <code>/IORQ</code> and written with <code>OUT (n),A</code>. The
-clock runs at 250 Hz, because a Z80 instruction takes more clock cycles
-than a 6502&#39;s.</li>
+<li><strong><code>Z80A example</code></strong> — the ROM is all of memory, from <code>$0000</code> (the upper
+half repeats it), and needs no glue logic: <code>/MREQ</code> is its chip enable and
+<code>/RD</code> its output enable. The VIA sits in the Z80&#39;s I/O space, selected by
+<code>/IORQ</code> and written with <code>OUT (n),A</code>. The clock runs at 250 Hz, because a
+Z80 instruction takes more clock cycles than a 6502&#39;s. To build it for
+real, use the CMOS Z84C00: an NMOS Z80A cannot be clocked that slowly.</li>
 </ul>
 <p>The ROM&#39;s program comes with the example, so you don&#39;t load anything. Like
 every ROM, the copy gets its own backing file, and the program is saved in

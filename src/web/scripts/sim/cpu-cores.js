@@ -38,12 +38,17 @@
 //     status, as the monitor prints them, and the memory access in flight;
 //   · `disassemble(read, addr)` — its instruction set's disassembler, and
 //     `isCall(line)` — whether a decoded line calls a subroutine (what the
-//     monitor's Step Over is offered for);
+//     monitor's Step Over is offered for), and `isReturn(line)` — whether it
+//     is a SUBROUTINE's return (never an interrupt's: how Step Over sees a
+//     call that returned past its inline arguments);
 //   · `spOf(state)` + `spMask` — the stack pointer as the operation in flight
 //     began, and its width: Step Over's test for a call that has RETURNED
 //     (back at the return address, the stack no deeper than it was);
 //   · `stackOf(state)` — where the stack's top is (live), how wide an entry
 //     the panel shows and how many there can be;
+//   · `waiting(state)` — whether it is waiting with no instruction to start
+//     (WAI, STP, HALT): a Step there moves one bus cycle, not to a start
+//     that only an interrupt brings;
 //   · `canEdit(state)` + `setRegister(state, name, value)` — the registers
 //     may be changed only at an instruction's very start (its opcode fetch on
 //     the bus, nothing of it run), where the state's committed registers ARE
@@ -128,6 +133,11 @@ export function w65c02Monitor(pins) {
     },
 
     isCall: (line) => line?.bytes?.[0] === 0x20, // JSR
+    isReturn: (line) => line?.bytes?.[0] === 0x60, // RTS
+
+    // Waiting for an interrupt (WAI) or stopped for good (STP): no
+    // instruction starts until it is over.
+    waiting: (s) => !live(s),
 
     canEdit: atStart,
 
@@ -229,6 +239,9 @@ const Z80_WORDS = { IX: "ix", IY: "iy", SP: "sp", PC: "pc" };
 const Z80_BYTES = { F: "f", I: "i", R: "r" };
 const Z80_SMALL = { IM: ["im", 2], IFF1: ["iff1", 1], IFF2: ["iff2", 1] };
 
+/** A decoded line's opcode, past any DD/FD prefix. */
+const z80Opcode = (line) => line?.bytes?.find((b) => b !== 0xdd && b !== 0xfd);
+
 /** CALL, CALL cc and RST — the unprefixed opcodes that push a return. */
 const isZ80Call = (op) =>
   op === 0xcd || (op & 0xc7) === 0xc4 || (op & 0xc7) === 0xc7;
@@ -277,7 +290,15 @@ export function z80Monitor(pins) {
     // Words, from SP up: the stack's top first.
     stackOf: (s) => ({ top: liveZ80(s).sp, width: 2, count: 0x8000 }),
 
-    isCall: (line) => isZ80Call(line?.bytes?.[0]),
+    // Past any DD/FD prefix: the core runs `DD CD nn nn` as the CALL it is.
+    isCall: (line) => isZ80Call(z80Opcode(line)),
+    isReturn(line) {
+      const op = z80Opcode(line);
+      return op === 0xc9 || (op & 0xc7) === 0xc0; // RET, RET cc
+    },
+
+    // Halted: the NOP it fetches over and over starts nothing.
+    waiting: (s) => s.halted === true && s.cur === "instr",
 
     canEdit: atStart,
 
@@ -327,8 +348,11 @@ export function z80Monitor(pins) {
       if (s.t !== 1 || s.log.length !== 0 || off(s)) return null;
       if (s.cur === "instr" && s.mk !== "M1") return null;
       if (prev?.mk === "BUSACK") return null; // the held cycle, resumed
-      // A halted CPU fetches its NOP over and over at the one address.
-      if (s.halted && prev?.halted && prev.pc === s.pc) return null;
+      // A halted CPU fetches its NOP over and over at the one address — the
+      // FIRST of those too: PC already names the instruction after the HALT,
+      // which has not started (a breakpoint there waits for the interrupt's
+      // return). An interrupt taken out of the halt is a start of its own.
+      if (s.halted && s.cur === "instr") return null;
       return s.cur;
     },
 
@@ -352,9 +376,11 @@ export function z80Monitor(pins) {
           { name: "HL'", value: pair(r.h2, r.l2), digits: 4 },
           { name: "I", value: r.i, digits: 2 },
           { name: "R", value: r.r, digits: 2 },
-          { name: "IM", value: r.im, digits: 1 },
-          { name: "IFF1", value: r.iff1 ? 1 : 0, digits: 1 },
-          { name: "IFF2", value: r.iff2 ? 1 : 0, digits: 1 },
+          // `max`: the most `setRegister` takes, so the view refuses a digit
+          // over it rather than show a value the core will not write.
+          { name: "IM", value: r.im, digits: 1, max: Z80_SMALL.IM[1] },
+          { name: "IFF1", value: r.iff1 ? 1 : 0, digits: 1, max: Z80_SMALL.IFF1[1] }, // prettier-ignore
+          { name: "IFF2", value: r.iff2 ? 1 : 0, digits: 1, max: Z80_SMALL.IFF2[1] }, // prettier-ignore
         ],
         flags: { names: ["S", "Z", "5", "H", "3", "P/V", "N", "C"], value: r.f, reg: "F", fixed: 0 }, // prettier-ignore
         step: { index: s.log.length + 1, label: `${s.mk} T${s.t}` },

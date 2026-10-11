@@ -119,6 +119,11 @@ export const HAND_BUILT = Object.freeze({
   LM317: "lm317.chiphippo",
   relay: "relay.chiphippo",
   load: "load.chiphippo",
+  // The passives proved under Spice Lite: an RC's time constant (an LED fade,
+  // a Schmitt timer) and an LC's ring — tests/spice-rlc-examples.test.js
+  // holds each to its closed form.
+  "cap-electrolytic": "rc.chiphippo",
+  inductor: "lc.chiphippo",
 });
 
 const DEMOS_ROOT = fileURLToPath(new URL("../demos/", import.meta.url));
@@ -686,6 +691,11 @@ export function validateHandBuilt(desktop, label) {
     state: new Map(),
     prevPinLevels: new Map(),
     signalLevels: new Map(),
+    // A clock brick drives its `out` from the moment Run is pressed — LOW,
+    // as a run starts it — so the chip it clocks is not read as floating.
+    clockPhase: new Map(
+      doc.components.filter((c) => c.kind === "clock").map((c) => [c.id, L]),
+    ),
     now: 0,
   });
   for (const [id, { status }] of result.chipStatus) {

@@ -137,6 +137,38 @@ test("dropping the default project empties the working slot", () => {
   });
 });
 
+test("a recovery that could not be read is set aside, never deleted", () => {
+  withStore((store) => {
+    store.newProject();
+    const slot = store.defaultProjectPath;
+    const bytes = fs.readFileSync(slot, "utf8");
+    const aside = store.setAsideDefaultProject();
+    assert.ok(aside.startsWith(`${slot}.unread-`));
+    assert.equal(store.hasDefaultProject(), false, "the slot is free");
+    assert.equal(fs.readFileSync(aside, "utf8"), bytes, "the work kept");
+    assert.equal(store.setAsideDefaultProject(), null, "nothing left to move");
+  });
+});
+
+test("a HELD working slot is neither written, nor taken over, nor removed", () => {
+  withStore((store) => {
+    const meta = store.newProject();
+    const slot = store.defaultProjectPath;
+    const bytes = fs.readFileSync(slot, "utf8");
+    store.holdDefaultProject();
+    assert.equal(store.removeDefaultProject(), false);
+    const fresh = store.newProject();
+    assert.equal(fresh.location, null, "a new project, living nowhere yet");
+    assert.throws(() => store.write(slot, meta), { code: "SLOT_HELD" });
+    assert.throws(() => store.writeRecovery(meta, "/x/y.chiphippo"), { code: "SLOT_HELD" }); // prettier-ignore
+    assert.equal(
+      fs.readFileSync(slot, "utf8"),
+      bytes,
+      "the unread work untouched",
+    );
+  });
+});
+
 // ── The file ────────────────────────────────────────────────────────────────
 
 test("a project file round-trips WHOLE, wherever it is written", () => {

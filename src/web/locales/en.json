@@ -1481,7 +1481,9 @@
     "downloadedVersion": "Version {version} has been downloaded.",
     "restart": "Restart",
     "upToDate": "Up to date",
-    "checkFailed": "Update check failed"
+    "checkFailed": "Update check failed",
+    "installFailed": "Update not installed",
+    "installFailedMessage": "The update could not be installed just now, so Chip Hippo is still open on this version. Press Restart to try again."
   },
   "bus": {
     "rename": "Rename bus…",

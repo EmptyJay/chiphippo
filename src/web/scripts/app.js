@@ -2009,11 +2009,14 @@ async function init() {
    * smooth or store charge, read by the timing chips and written into a KiCad
    * export. A toast rather than a dialog (nothing waits on it), with "Don't
    * show again" for good; a FUNCTION declaration so the controller's callback,
-   * wired above, reaches it.
+   * wired above, reaches it. That is the LOGIC engine's capacitor: with Spice
+   * Lite on it does filter and store charge, so the note would be wrong and
+   * is not shown.
    */
   function noteCapacitorPlaced(ref) {
     if (!partDef(ref)?.capacitor) return;
     if (currentSettings.capacitorNoteDismissed === true) return;
+    if (currentSettings.spiceLite?.enabled === true) return;
     notifications.notify({
       key: "capacitor-note",
       variant: "info",
@@ -2342,8 +2345,8 @@ async function init() {
       bridge.settings
         .set({ cpuMonitorKeepEdits: on })
         .catch((err) => console.error("[renderer] settings:set failed:", err)),
-    saveRom: (compId, bytes) =>
-      memoryBridge?.keepRunEdits(compId, bytes) ?? Promise.resolve(false),
+    saveRom: (compId, bytes, opts) =>
+      memoryBridge?.keepRunEdits(compId, bytes, opts) ?? Promise.resolve(false),
     // Its breakpoints live in the project, per desktop.
     store: {
       load: () => workspace?.cpuBreakpoints() ?? {},

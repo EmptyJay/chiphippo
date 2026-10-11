@@ -92,12 +92,9 @@ import {
 } from "../model/timing-summary.js";
 import { BreadboardView } from "./breadboard-view.js";
 import { RouteDebugLayer } from "./route-debug-layer.js";
-import { ChipView, buildChipSvg, chipBodyBox } from "./chip-view.js";
-import {
-  DiscreteView,
-  buildDiscreteSvg,
-  discreteBox,
-} from "./discrete-view.js";
+import { ChipView, buildChipSvg } from "./chip-view.js";
+import { DiscreteView, buildDiscreteSvg } from "./discrete-view.js";
+import { partBodyBox } from "./part-body-box.js";
 import { PsuView } from "./psu-view.js";
 import { ClockView } from "./clock-view.js";
 import { LoadView } from "./load-view.js";
@@ -188,36 +185,6 @@ const RING_RADIUS = 0.55;
 /** World-unit margin fitToScreen() leaves around the desk's bounds, so the
     outermost board/part/wire doesn't sit flush against the viewport edge. */
 const FIT_PAD = 4;
-
-/**
- * A seated part's DRAWN body, local to its anchor hole — what the auto-router
- * has to route around, which is not the same thing as where its pins are. A
- * 7-segment digit's nine pins lie along ONE row while the block itself stands
- * seven pitch above them; sized from pins alone, a wire runs straight through
- * the middle of the display.
- *
- * It lives here because the geometry does: `chipBox` and `discreteBox` belong to
- * the views, and `model/route-space.js` may not import from `components/`. So
- * the model takes this as an argument and the view side answers.
- *
- * Null means "size it from the pins instead", which is right for a DIP and
- * honest for an unknown ref. A part in the TWO-FREE-ENDS form is deliberately
- * null too: its leads can be on different strips at any angle, so there is no
- * anchored box to place — its pin extent is the only truthful answer.
- */
-function partBodyBox(comp) {
-  try {
-    const def = partDef(comp.ref);
-    if (!def) return null;
-    if (def.rotatable && comp.params?.rot === 90) return null;
-    if (comp.kind === "chip") {
-      return def.package ? chipBodyBox(def.package, comp.anchor) : null;
-    }
-    return discreteBox(comp.ref, comp.params?.rot, comp.params);
-  } catch {
-    return null; // an unknown ref sizes itself from its pins
-  }
-}
 
 /** How close (pitch units) the cursor must press to a wire's endpoint cap to
     grab it for a drag-the-end gesture. A shade over one hole so the cap is
@@ -1379,12 +1346,7 @@ export class DeskController {
   /** Live resistor drag: rigid lattice-snapped translation, both ends checked.
       Pin 1 seats in the nearest hole in reach where the part fits; the lead
       keeps its bend, so the far end may reach a NEIGHBOURING strip's rail. */
-  // `d` defaults to the live drag, but the RELEASE passes its own copy — the
-  // up-handler clears #mode before it re-resolves. `preview` is off on the
-  // RELEASE re-resolve: the handler has already put the riding-wire
-  // preview away, and re-establishing it there would leave the committed wires
-  // drawn as a drag that has ended.
-  #trackResistorDrag(d = this.#mode, { preview = true } = {}) {
+  #trackResistorDrag(d = this.#mode) {
     // ONE delta moves both ends, so length and angle never change.
     //
     // Pin 1 lands on the NEAREST hole in snap reach of where it actually is
@@ -1432,7 +1394,6 @@ export class DeskController {
     const view = this.#partViews.get(d.id);
     view?.updateSpanWorld(p1, p2);
     view?.setIllegal(!legal);
-    if (!preview) return;
     if (d.riding) this.#wireLayer.setPartDrag(this.#ridingWirePreview(d));
     if (d.ridingParts) this.#applyLeadRiders(d);
   }
@@ -4108,12 +4069,10 @@ export class DeskController {
 
     if (d.kind === "drag-resistor") {
       if (!d.active) return; // plain click — the press already selected it
-      // Same re-resolve as the end drag: rewrite d.holes/d.legal at the
-      // release point rather than trusting the last coalesced move.
-      if (!cancelled) {
-        d.lastWorld = releaseWorld(this.#deskView, e, d.lastWorld);
-        this.#trackResistorDrag(d, { preview: false });
-      }
+      // Pin 1 carries the body by the single-point rule, so as with the end
+      // drag the drop is the seat the last move SHOWED (the part drawn in it),
+      // never re-resolved at the release point — a release out of every
+      // hole's reach would throw back a seat the screen had promised.
       if (!cancelled && d.legal && d.holes) {
         // An Option-drag commits the part AND everything riding it as ONE
         // mutation (the same transaction a footprint part's does); a plain drag

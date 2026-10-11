@@ -23,7 +23,8 @@
 //
 //   W65C02  CPU + AT28C256 ROM ($8000–$FFFF) + W65C22 VIA ($0000–$7FFF),
 //           decoded by one 74LS04 on A15
-//   Z80A    CPU + AT28C256 ROM ($0000–$7FFF) + W65C22 VIA on the Z80's own
+//   Z80A    CPU + AT28C256 ROM (all of memory: /MREQ selects it, so
+//           $8000–$FFFF mirrors $0000–$7FFF) + W65C22 VIA on the Z80's own
 //           I/O space (/IORQ selects it, OUT (n),A writes it) — no glue
 //
 // Both drive the SAME LCD the same way, off the VIA's ports: PB0–PB7 are the
@@ -60,8 +61,10 @@ import { buildNetlist } from "../src/web/scripts/sim/netlist.js";
 import { tick } from "../src/web/scripts/sim/engine.js";
 import { H, L } from "../src/web/scripts/sim/levels.js";
 import { partDef } from "../src/web/scripts/catalog/index.js";
-import { chipBodyBox } from "../src/web/scripts/components/chip-view.js";
-import { discreteBox } from "../src/web/scripts/components/discrete-view.js";
+// The view layer's part outlines, for the router — the desk's own, so a wire
+// is kept off a part's real body (the LCD's overhang included) exactly as
+// the toolbar's Auto-route keeps it.
+import { partBodyBox } from "../src/web/scripts/components/part-body-box.js";
 import {
   CPU,
   INV,
@@ -110,12 +113,13 @@ const Z80 = {
 // assembly LISTINGS, which Prettier would set one byte per line.
 
 // W65C02 — the VIA is zero-page ($0000–$7FFF mirrors it), so every access is
-// a 3-cycle `STA zp`. A letter is 51 cycles: half a second at 100 Hz.
+// a 3-cycle `STA zp`. A letter is 50 cycles (31 to send it, 19 of pause):
+// half a second at 100 Hz.
 const W65_ORB = 0x00;
 const W65_ORA = 0x01;
 const W65_DDRB = 0x02;
 const W65_DDRA = 0x03;
-const W65_DELAY = 6; // × 5 cycles of DEY/BNE
+const W65_DELAY = 4; // DEY/BNE passes: 5 cycles each, the last 4
 
 // prettier-ignore
 const W65C02_PROGRAM = asm(0x8000, [
@@ -167,7 +171,10 @@ const W65C02_PROGRAM = asm(0x8000, [
 
 // Z80A — the VIA is an I/O device: OUT (n),A puts n on A0–A7, so the port
 // number IS the register (RS0–RS3 ← A0–A3). A letter is 129 T-states: about
-// half a second at 250 Hz.
+// half a second at 250 Hz. Only a STATIC Z80 runs that slowly — the CMOS
+// Z84C00, clocked down to DC; an NMOS Z80A needs its clock's low half under a
+// couple of microseconds (~250 kHz at least), or its registers fade. The
+// caption says so, for whoever builds it.
 const Z80_ORB = 0x00;
 const Z80_ORA = 0x01;
 const Z80_DDRB = 0x02;
@@ -257,9 +264,10 @@ export const COMPUTERS = Object.freeze({
     guid: "c0de0080-0000-4000-8000-000000000001",
     caption: [
       "Z80A — Hello World",
-      "A Z80A runs the program in the AT28C256 ROM ($0000–$7FFF); the W65C22 VIA sits in the Z80's I/O space.",
+      "A Z80A runs the program in the AT28C256 ROM, which /MREQ selects (from $0000); the W65C22 VIA sits in the Z80's I/O space.",
       "/IORQ selects the VIA and OUT (n),A writes register n. Press Run: the greeting is typed a letter every half second.",
       "Hold the reset button to stop the CPU; let go and it starts again from $0000.",
+      "On a real bench use the CMOS Z84C00: an NMOS Z80A cannot be clocked this slowly.",
     ],
   }),
 });
@@ -505,11 +513,13 @@ function buildZ80A() {
     b.wire(romAt(MEM28.DQ[i]), viaAt(VIA.D[i]), "blue");
   }
 
-  // Decode, such as it is: the ROM is the low 32 K (/CE straight off A15)
-  // and answers reads (/OE ← /RD); the VIA is the I/O space (/CS2B ← /IORQ,
-  // CS1 strapped high), written when /WR is low (R/W̄ ← /WR). The Z80 keeps
-  // memory and I/O apart by itself, which is why there is no glue chip.
-  b.wire(cpuAt(Z80.A[15]), romAt(MEM28.CE), "yellow");
+  // Decode, such as it is: the ROM is memory (/CE ← /MREQ — all 64 K of it,
+  // the upper half a mirror, as nothing else lives there) and answers reads
+  // (/OE ← /RD); the VIA is the I/O space (/CS2B ← /IORQ, CS1 strapped high),
+  // written when /WR is low (R/W̄ ← /WR). /MREQ and /IORQ keep the two apart,
+  // which is why there is no glue chip: an IN (/RD with /IORQ) never enables
+  // the ROM, and a refresh (/MREQ without /RD) never has it drive the bus.
+  b.wire(cpuAt(Z80.MREQ), romAt(MEM28.CE), "yellow");
   b.wire(cpuAt(Z80.RD), romAt(MEM28.OE), "orange");
   st.tie(romB, rom.get(MEM28.WE), "+");
   b.wire(cpuAt(Z80.IORQ), viaAt(VIA.CS2B), "orange");
@@ -573,23 +583,6 @@ export function buildComputer(ref) {
   const built = build();
   addCaption(built.doc, spec.caption);
   return { ref, title: partDef(ref).title, spec, ...built };
-}
-
-/** The view layer's part outlines, for the router — the same injection the
-    desk makes (desk-controller.js `partBodyBox`), so a wire is kept off a
-    part's real body, the LCD's overhang included. */
-function partBodyBox(comp) {
-  try {
-    const def = partDef(comp.ref);
-    if (!def) return null;
-    if (def.rotatable && comp.params?.rot === 90) return null;
-    if (comp.kind === "chip") {
-      return def.package ? chipBodyBox(def.package, comp.anchor) : null;
-    }
-    return discreteBox(comp.ref, comp.params?.rot, comp.params);
-  } catch {
-    return null;
-  }
 }
 
 /**

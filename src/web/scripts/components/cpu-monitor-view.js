@@ -103,6 +103,15 @@ const STEP_BOXES = 8;
     `DEBUG_KEYS` where it has the same thing: F8 Continue, F6 Step). */
 export const MONITOR_KEYS = Object.freeze({ F8: "run", F6: "step", F7: "stepOver" }); // prettier-ignore
 
+/** Whether a keydown is the window's Escape — closing it, as the memory
+    inspector's does. Not when the view used the key (a typed digit dropped, a
+    selection let go), and not while a popup is up: the key reaches the window
+    BEFORE the modal <dialog> turns it into its `cancel`, so the right-click
+    menu's Escape would otherwise close the window under it. */
+export function escapeClosesWindow(e) {
+  return e.key === "Escape" && !e.defaultPrevented && !PopupManager.isOpen();
+}
+
 /** Redraw a scrolling panel's contents where its scroll stood. */
 function keepScroll(node, redraw) {
   const top = node.scrollTop;
@@ -305,10 +314,14 @@ export class CpuMonitorView {
   /**
    * Draw a `state` message.
    * @param {{cpus: Array<{id: string, label: string}>, compId: string|null,
-   *   running: boolean, mode: string, summary: object|null}} state
+   *   running: boolean, mode: string, summary: object|null, desk?: number}} state
    */
   render(state) {
-    if (state.compId !== this.#state?.compId) this.#forgetCpu();
+    // Another CPU — or another document (`desk`), whose c1 is another chip.
+    const prev = this.#state;
+    if (state.compId !== prev?.compId || state.desk !== prev?.desk) {
+      this.#forgetCpu();
+    }
     this.#state = state;
     const s = state.summary;
     const mode = state.running ? state.mode : "stopped";
@@ -366,6 +379,9 @@ export class CpuMonitorView {
 
   /** Another CPU shown: nothing selected, the block back on its PC. */
   #forgetCpu() {
+    // A byte or register just typed belongs to the CPU it was typed into.
+    this.#written.clear();
+    this.#regWritten.clear();
     this.#select(null);
     this.#selectRegister(null);
     this.#memAt = null;
@@ -1068,7 +1084,11 @@ export class CpuMonitorView {
       return handled();
     }
     if (/^[0-9a-f]$/i.test(e.key)) {
-      this.#regDigits += e.key.toUpperCase();
+      const typed = this.#regDigits + e.key.toUpperCase();
+      // A digit the register cannot hold (IM 3) is refused here: the core
+      // would refuse it, and the view would show it written meanwhile.
+      if (r.max != null && Number.parseInt(typed, 16) > r.max) return handled();
+      this.#regDigits = typed;
       if (this.#regDigits.length >= r.digits) this.#commitRegister(r);
       return handled();
     }

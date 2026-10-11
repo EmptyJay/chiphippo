@@ -611,7 +611,9 @@ free-running clock and timed part moves on with the CPU, exactly as the main
 subroutine: a 6502 `JSR`, or a Z80 `CALL`, `CALL cc` or `RST`. It runs the
 whole subroutine and pauses at the instruction after the call, once the stack
 is back where the call found it (so a recursive call returning to the same
-place does not stop it early). A breakpoint inside the subroutine stops it
+place does not stop it early). A subroutine that reads data placed right after
+the call and returns past it stops where it returns to. A breakpoint inside the
+subroutine stops it
 there. A short call is run at once, like a step. A long one, such as a delay
 loop, carries on as a normal run at the circuit's own speed, and pauses when
 the call returns; press **Pause** to give up on it where it is. The return
@@ -732,11 +734,12 @@ reset button and let go to watch it again; open the
 
 - **`W65C02 example`** — the ROM fills `$8000`–`$FFFF` and the VIA sits in the
   low half, split by one 74LS04 on `A15`. The clock runs at 100 Hz.
-- **`Z80A example`** — the ROM fills `$0000`–`$7FFF` and needs no glue logic:
-  `A15` is its chip enable and `/RD` its output enable. The VIA sits in the
-  Z80's I/O space, selected by `/IORQ` and written with `OUT (n),A`. The
-  clock runs at 250 Hz, because a Z80 instruction takes more clock cycles
-  than a 6502's.
+- **`Z80A example`** — the ROM is all of memory, from `$0000` (the upper
+  half repeats it), and needs no glue logic: `/MREQ` is its chip enable and
+  `/RD` its output enable. The VIA sits in the Z80's I/O space, selected by
+  `/IORQ` and written with `OUT (n),A`. The clock runs at 250 Hz, because a
+  Z80 instruction takes more clock cycles than a 6502's. To build it for
+  real, use the CMOS Z84C00: an NMOS Z80A cannot be clocked that slowly.
 
 The ROM's program comes with the example, so you don't load anything. Like
 every ROM, the copy gets its own backing file, and the program is saved in

@@ -70,10 +70,31 @@ let getWindow = () => null;
 // answers (`checkDone`).
 let manualCheck = false;
 let checkInFlight = false;
+// Whether the last "error" belonged to a CHECK in flight — read by an install
+// attempt's own error listener, which runs after initUpdater's (that one
+// settles the check first). A check's failure is not the install's.
+let errorWasCheck = false;
 
 /** The check in flight answered: the next one starts from its own ask. */
 function checkDone() {
   checkInFlight = false;
+}
+
+// macOS installs through Electron's native Squirrel updater, which takes the
+// download from electron-updater and has it ready some seconds later. Asked to
+// install before then, electron-updater hangs a listener on the native
+// "update-downloaded" that quits and installs WHENEVER it fires — one nothing
+// can take back, so an attempt this module gave up on (its deadline) would
+// still restart the app minutes later, unasked. So on macOS the wait is ours,
+// on a listener we remove: electron-updater is only asked once Squirrel has
+// the update, and then installs at once. Whether Squirrel HAS it is
+// electron-updater's own record — `squirrelDownloadedUpdate`, the flag its
+// MacUpdater.quitAndInstall decides on — read only when it is a boolean: an
+// updater without it is asked straight away, as before.
+
+/** Electron's own native autoUpdater (Squirrel on macOS). */
+function nativeUpdater() {
+  return require("electron").autoUpdater;
 }
 
 let wired = false;
@@ -136,6 +157,7 @@ function initUpdater(resolveWindow) {
     pushUpdaterEvent("updater:downloaded", { version: info?.version }),
   );
   autoUpdater.on("error", (err) => {
+    errorWasCheck = checkInFlight;
     pushUpdaterEvent("updater:error", {
       message: (err && err.message) || String(err),
       manual: manualCheck,
@@ -201,10 +223,12 @@ function checkForUpdates({ manual = false } = {}) {
  * native Squirrel updater, which can decline to quit and say nothing at all.
  * So an attempt that has neither quit nor failed by `deadlineMs` is taken as
  * failed — the guard is asked again on a later quit, which is safe; leaving
- * it answered "go" with autosave stopped is not.
+ * it answered "go" with autosave stopped is not. And a failed attempt leaves
+ * nothing armed behind it: on macOS, until Squirrel has the update, the wait
+ * is this module's own (see `nativeUpdater`), so giving up takes it back.
  *
  * @param {() => void} [onFailed]
- * @param {{deadlineMs?: number}} [opts]
+ * @param {{deadlineMs?: number, platform?: string}} [opts]
  */
 // The install attempt still waiting to be told whether it quit (one at a
 // time: a second Restart click settles the first silently).
@@ -215,9 +239,14 @@ let pendingInstall = null;
 // proxy first, which takes seconds for a large app — never a minute.
 const INSTALL_DEADLINE_MS = 60_000;
 
-function quitAndInstall(onFailed, { deadlineMs = INSTALL_DEADLINE_MS } = {}) {
+function quitAndInstall(
+  onFailed,
+  { deadlineMs = INSTALL_DEADLINE_MS, platform = process.platform } = {},
+) {
   pendingInstall?.(); // a second attempt replaces the first
   let autoUpdater = null;
+  let native = null;
+  let waiting = false; // on macOS, for Squirrel: our wait, nothing installing
   let settled = false;
   let deadline = null;
   const settle = () => {
@@ -225,8 +254,9 @@ function quitAndInstall(onFailed, { deadlineMs = INSTALL_DEADLINE_MS } = {}) {
     settled = true;
     clearTimeout(deadline);
     if (pendingInstall === settle) pendingInstall = null;
-    autoUpdater?.removeListener?.("error", failed);
-    autoUpdater?.removeListener?.("checking-for-update", settle);
+    autoUpdater?.removeListener?.("error", onError);
+    autoUpdater?.removeListener?.("checking-for-update", onCheck);
+    native?.removeListener?.("update-downloaded", install);
     app.removeListener?.("before-quit", settle);
   };
   function failed() {
@@ -234,25 +264,54 @@ function quitAndInstall(onFailed, { deadlineMs = INSTALL_DEADLINE_MS } = {}) {
     settle();
     onFailed?.();
   }
+  // An error from a check that was already running is that check's; this
+  // attempt's own failure still has the deadline.
+  function onError() {
+    if (!errorWasCheck) failed();
+  }
+  // A NEW check means this attempt is long over — its errors are that
+  // check's, never this install's (they would withdraw a close-guard "go"
+  // nobody had given). But while the wait for Squirrel is OURS, nothing is
+  // installing: ending it quietly would leave the guard's "go" standing with
+  // the app open and autosave stopped. That attempt failed, and says so.
+  function onCheck() {
+    if (waiting) failed();
+    else settle();
+  }
+  function install() {
+    if (settled) return;
+    waiting = false;
+    try {
+      // isSilent=false → show the installer UI on Windows. The second argument
+      // only counts for a SILENT install; a visible one relaunches per
+      // `autoRunAppAfterInstall` (default true), which is what we want anyway.
+      autoUpdater.quitAndInstall(false, true);
+    } catch {
+      // Nothing downloaded yet, or not packaged: no quit is coming.
+      failed();
+    }
+  }
   pendingInstall = settle;
   try {
     autoUpdater = getAutoUpdater();
-    autoUpdater.on?.("error", failed);
-    // A NEW check means this attempt is long over — its errors are that
-    // check's, never this install's (they would withdraw a close-guard "go"
-    // nobody had given).
-    autoUpdater.on?.("checking-for-update", settle);
+    autoUpdater.on?.("error", onError);
+    autoUpdater.on?.("checking-for-update", onCheck);
     app.once?.("before-quit", settle);
     deadline = setTimeout(failed, deadlineMs);
     deadline.unref?.();
-    // isSilent=false → show the installer UI on Windows. The second argument
-    // only counts for a SILENT install; a visible one relaunches per
-    // `autoRunAppAfterInstall` (default true), which is what we want anyway.
-    autoUpdater.quitAndInstall(false, true);
   } catch {
-    // Nothing downloaded yet, or not packaged: no quit is coming.
     failed();
+    return;
   }
+  if (platform === "darwin" && autoUpdater.squirrelDownloadedUpdate === false) {
+    native = nativeUpdater();
+    native?.once?.("update-downloaded", install);
+    if (native) {
+      waiting = true;
+      return;
+    }
+  }
+  install();
 }
 
 module.exports = { initUpdater, checkForUpdates, quitAndInstall };

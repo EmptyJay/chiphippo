@@ -309,6 +309,26 @@ Z80Computer.prototype.tick = Computer.prototype.tick;
 Z80Computer.prototype.clock = Computer.prototype.clock;
 Z80Computer.prototype.reader = Computer.prototype.reader;
 
+test("Z80: a HALT's fetches start nothing — not even the first", () => {
+  const ram = new Uint8Array(8192);
+  // NOP ; HALT ; LD A,1 — PC names $0002 the moment it halts.
+  ram.set([0x00, 0x76, 0x3e, 0x01], 0);
+  const z = new Z80Computer(ram);
+  z.clock(60);
+  assert.ok(z.state.get("c1").halted);
+  const starts = z.track.history.filter((h) => h.kind === "instr").map((h) => h.pc); // prettier-ignore
+  assert.deepEqual(starts, [0x0000, 0x0001], "LD A,1 has not started");
+  // An interrupt taken out of the halt is still a start of its own.
+  const halted = { mk: "M1", t: 1, log: [], halted: true };
+  assert.equal(z.cpu.startOf(null, { ...halted, cur: "nmi" }), "nmi");
+  assert.equal(z.cpu.startOf(null, { ...halted, cur: "int" }), "int");
+  // Waiting — what a Step there knows: halted, until it is taken out.
+  assert.equal(z.cpu.waiting({ ...halted, cur: "instr" }), true);
+  assert.equal(z.cpu.waiting({ ...halted, cur: "nmi" }), false);
+  const w65 = cpuOf(partDef("W65C02"));
+  assert.deepEqual(["wai", "stp", "instr", "irq"].map((cur) => w65.waiting({ cur })), [true, true, false, false]); // prettier-ignore
+});
+
 test("Z80: the pipeline, the step and the map through /MREQ", () => {
   const ram = new Uint8Array(8192);
   // LD A,$42 ; LD ($0600),A ; HALT
@@ -334,6 +354,8 @@ test("Z80: the pipeline, the step and the map through /MREQ", () => {
     read,
   });
   assert.equal(s.kind, "z80");
+  const im = s.view.registers.find((r) => r.name === "IM");
+  assert.equal(im.max, 2, "the view is told what setRegister takes");
   assert.equal(s.pipeline.current.text, "LD ($0600),A");
   assert.deepEqual(s.pipeline.previous.map((l) => l.text || l.kind), ["reset", "LD A,$42"]); // prettier-ignore
   assert.equal(s.pipeline.ahead[0].text, "HALT");
@@ -508,6 +530,33 @@ test("SimController: the monitor's Step runs to the CPU's next operation and pau
   sim.stop();
 });
 
+test("Step Over's return: at the return address, the stack where the call left it — a deep recursion is not shallow", async () => {
+  const { returned } = await import("../components/sim-controller.js");
+  const cpu = { pcOf: (s) => s.pc, spOf: (s) => s.sp };
+  const over = { ret: 0x8003, sp: 0xf0, mask: 0xff }; // a 6502's one page
+  const at = (sp, pc = 0x8003) => returned(over, cpu, { pc, sp });
+  assert.equal(at(0xf0), true, "where the call found it");
+  assert.equal(at(0xf2), true, "a byte or two shallower");
+  assert.equal(at(0xee), false, "an inner return, deeper");
+  assert.equal(at(0x60), false, "144 bytes deeper is deeper, not wrapped round to shallow"); // prettier-ignore
+  assert.equal(at(0xf0, 0x8004), false, "not at the return address");
+});
+
+test("SimController: a Step on a halted CPU is one bus cycle, not the Step's whole budget", async () => {
+  const { sim, states } = await z80Controller({ hz: 1 });
+  sim.pause();
+  sim.monitorCpu("c1");
+  sim.pokeCpuMemory("c1", 0x0001, 0x76); // NOP ; HALT
+  for (let i = 0; i < 80 && states.at(-1).cpuMonitor?.view.status !== "halt"; i++) sim.step(); // prettier-ignore
+  const before = states.at(-1).cpuMonitor;
+  assert.equal(before.view.status, "halt");
+  assert.equal(sim.stepCpu("c1"), true, "done — nothing to wait for");
+  const after = states.at(-1).cpuMonitor;
+  assert.equal(after.cycles, before.cycles + 1, "one T-state on");
+  assert.equal(after.view.status, "halt");
+  sim.stop();
+});
+
 test("SimController: a breakpoint the monitor's Step lands on is reported", async () => {
   const { sim, states, breaks } = await z80Controller({ hz: 1 });
   sim.pause();
@@ -674,14 +723,17 @@ function fakeClock() {
  *   $0004 CALL $0020 · $0007 NOP · $0020 LD B,n · $0022 DJNZ $0022 · $0024 RET
  * (n = `loops`, 3 unless a test wants the call to take seconds).
  */
-async function atCall({ loops = 3, ...opts } = {}) {
+async function atCall({ loops = 3, program = null, ...opts } = {}) {
   const z = await z80Controller({ hz: 1000, ...opts });
   const { sim, states, breaks } = z;
   sim.pause();
   sim.monitorCpu("c1");
   const poke = (at, bytes) => bytes.forEach((b, i) => sim.pokeCpuMemory("c1", at + i, b)); // prettier-ignore
-  poke(0x0004, [0xcd, 0x20, 0x00, 0x00]);
-  poke(0x0020, [0x06, loops, 0x10, 0xfe, 0xc9]);
+  if (program) for (const [at, bytes] of program) poke(at, bytes);
+  else {
+    poke(0x0004, [0xcd, 0x20, 0x00, 0x00]);
+    poke(0x0020, [0x06, loops, 0x10, 0xfe, 0xc9]);
+  }
   sim.setCpuBreakpoints("c1", [0x0004]);
   for (let i = 0; i < 80 && !breaks.length; i++) sim.step();
   assert.equal(states.at(-1).cpuMonitor.pc, 0x0004);
@@ -708,6 +760,52 @@ test("SimController: Step Over runs the call and pauses at the instruction after
   assert.equal(s.pipeline.current.call, false);
   assert.equal(sim.stepOverCpu("c1"), false, "not at a call");
   sim.stop();
+});
+
+test("SimController: Step Over a call that returns past its inline argument stops where it came back", async () => {
+  // $0004 CALL $0020 · $0007 DB $AA · $0008 NOP — and the routine steps its
+  // return address over the byte: EX (SP),HL · INC HL · EX (SP),HL · CALL
+  // $0030 (a nested call: its RET leaves the stack deeper, not back) · RET.
+  const { sim, states, breaks } = await atCall({
+    program: [
+      [0x0004, [0xcd, 0x20, 0x00, 0xaa, 0x00]],
+      [0x0020, [0xe3, 0x23, 0xe3, 0xcd, 0x30, 0x00, 0xc9]],
+      [0x0030, [0xc9]],
+    ],
+  });
+  assert.equal(sim.stepOverCpu("c1"), "done");
+  const s = states.at(-1).cpuMonitor;
+  assert.equal(s.pc, 0x0008, "back past the argument, not inside the routine");
+  assert.equal(reg(s, "SP"), 0xffff);
+  assert.equal(sim.mode, "paused");
+  assert.deepEqual(breaks, []);
+  sim.stop();
+});
+
+test("SimController: Step Over is not fooled inside a routine that popped its return address", async () => {
+  // The routine takes its return address OFF the stack (POP HL), so inside it
+  // the stack stands where the call found it — and then a nested CALL's RET,
+  // or a RET NZ not taken, lands at depth 0 straight after a "return". Each
+  // must run on to the real way back, past the inline byte, at $0008.
+  for (const [what, routine] of [
+    // POP HL · CALL $0030 · INC HL · PUSH HL · RET        $0030: RET
+    ["a nested call", [0xe1, 0xcd, 0x30, 0x00, 0x23, 0xe5, 0xc9]],
+    // POP HL · XOR A · RET NZ (not taken: Z) · INC HL · PUSH HL · RET
+    ["a RET cc not taken", [0xe1, 0xaf, 0xc0, 0x23, 0xe5, 0xc9]],
+  ]) {
+    const { sim, states } = await atCall({
+      program: [
+        [0x0004, [0xcd, 0x20, 0x00, 0xaa, 0x00]],
+        [0x0020, routine],
+        [0x0030, [0xc9]],
+      ],
+    });
+    assert.equal(sim.stepOverCpu("c1"), "done", what);
+    const s = states.at(-1).cpuMonitor;
+    assert.equal(s.pc, 0x0008, `${what}: back past the argument, not inside the routine`); // prettier-ignore
+    assert.equal(reg(s, "SP"), 0xffff, what);
+    sim.stop();
+  }
 });
 
 test("SimController: a breakpoint inside the call stops Step Over there", async () => {
@@ -755,6 +853,24 @@ test("SimController: Pause cancels a Step Over handed to the run", async () => {
   clock.advance(10000);
   assert.deepEqual(breaks, [], "it ran on past the return");
   assert.equal(sim.mode, "running");
+  sim.stop();
+});
+
+test("SimController: a Pause whose catch-up reaches a breakpoint stops there, and is still a Pause", async () => {
+  const clock = fakeClock();
+  const { sim, states, breaks, modes } = await atCall({ clock });
+  sim.setCpuBreakpoints("c1", [0x0007]);
+  sim.resume();
+  // Time passes with no batch run yet: the Pause has the call to catch up on.
+  clock.cost = 500;
+  clock.now();
+  clock.cost = 0;
+  const told = modes.length;
+  sim.pause();
+  assert.deepEqual(breaks, [{ compId: "c1", addr: 0x0007, paused: false }], "not the break's pause: no window raised"); // prettier-ignore
+  assert.equal(sim.mode, "paused");
+  assert.deepEqual(modes.slice(told), ["paused"], "told once");
+  assert.equal(states.at(-1).cpuMonitor.pc, 0x0007, "at the breakpoint");
   sim.stop();
 });
 

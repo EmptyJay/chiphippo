@@ -1481,7 +1481,9 @@
     "downloadedVersion": "Version {version} wurde heruntergeladen.",
     "restart": "Neu starten",
     "upToDate": "Aktuell",
-    "checkFailed": "Updatesuche fehlgeschlagen"
+    "checkFailed": "Updatesuche fehlgeschlagen",
+    "installFailed": "Update nicht installiert",
+    "installFailedMessage": "Das Update konnte gerade nicht installiert werden, daher ist Chip Hippo weiterhin in dieser Version geöffnet. Klicke auf Neu starten, um es erneut zu versuchen."
   },
   "bus": {
     "rename": "Bus umbenennen…",

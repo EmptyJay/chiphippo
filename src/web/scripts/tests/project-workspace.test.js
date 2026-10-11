@@ -330,6 +330,7 @@ async function harness({
   // what a DELIBERATE save wrote, and a background stash would move the working
   // slot underneath it. `0` is the real off switch, not a test-only escape.
   autoSaveMs = 0,
+  holdMs = undefined,
 } = {}) {
   const win = resetDom();
   const sim = {
@@ -389,6 +390,7 @@ async function harness({
     },
     boot,
     autoSaveMs,
+    holdMs,
     onActiveChange: () => {
       announced.count += 1;
     },
@@ -716,6 +718,108 @@ test("moving between desktops is not a change, and neither is panning", async ()
   await settle();
   h.moveCamera({ cx: 90, cy: 90, zoom: 3 });
   assert.equal(h.workspace.dirty, false);
+});
+
+test("leaving a desktop waits for what its Stop holds, and stashes what that wrote", async () => {
+  const h = await harness();
+  await twoDesktops(h);
+  // What the CPU monitor's kept ROM edits do: a write, THEN the chip flagged
+  // on the desk the run edited — after the Stop, before the swap goes on.
+  const onLeave = (e) => {
+    assert.equal(e.detail.project, false);
+    e.detail.hold(settle().then(() => h.doc.addAnnotation("note", 0, 0, "kept"))); // prettier-ignore
+  };
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    await h.workspace.selectTab("t2");
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+  assert.equal(h.sim.stops, 1);
+  const left = h.workspace.desktopSnapshot("t1").doc;
+  assert.deepEqual(left.annotations.map((a) => a.text), ["kept"], "in the desktop left"); // prettier-ignore
+  assert.deepEqual(h.doc.toJSON().annotations ?? [], [], "not the one arrived");
+});
+
+test("a second switch while a leave is held waits its turn: the write lands where it belongs, the last click wins", async () => {
+  const h = await harness();
+  await h.workspace.addTab(); // t2
+  await settle();
+  await h.workspace.addTab(); // t3
+  await settle();
+  await h.workspace.selectTab("t1");
+  await settle();
+  // t1's leave is held (a Stop's kept ROM edits being written), and lands a
+  // write in the desk being left when it lets go.
+  let release;
+  const gate = new Promise((r) => (release = r));
+  let first = true;
+  const onLeave = (e) => {
+    if (!first) return;
+    first = false;
+    e.detail.hold(gate.then(() => h.doc.addAnnotation("note", 0, 0, "kept-from-t1"))); // prettier-ignore
+  };
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    const toT2 = h.workspace.selectTab("t2");
+    await settle();
+    const toT3 = h.workspace.selectTab("t3"); // clicked during the hold
+    await settle();
+    assert.equal(h.workspace.activeTab.id, "t1", "nothing moves until t1 has let go"); // prettier-ignore
+    release();
+    await Promise.all([toT2, toT3]);
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+  const notes = (id) => (h.workspace.desktopSnapshot(id).doc.annotations ?? []).map((a) => a.text); // prettier-ignore
+  assert.deepEqual(notes("t1"), ["kept-from-t1"], "in the desktop it was made for"); // prettier-ignore
+  assert.deepEqual(notes("t2"), []);
+  assert.deepEqual(notes("t3"), []);
+  assert.equal(
+    h.workspace.activeTab.id,
+    "t3",
+    "the last click is the desk you get",
+  );
+});
+
+test("a quit while a switch is held waits for it: the question is about the project as it will stand", async () => {
+  const h = await harness();
+  await twoDesktops(h); // on t1
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const onLeave = (e) => e.detail.hold(gate);
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    const switching = h.workspace.selectTab("t2");
+    await settle();
+    const closing = h.workspace.confirmClose();
+    await settle();
+    assert.equal(PopupManager.isOpen(), false, "not asked while the write is still to land"); // prettier-ignore
+    release();
+    await switching;
+    await settle();
+    assert.equal(h.workspace.activeTab.id, "t2");
+    assert.ok(findButton("Discard"), "then asked (the project is unsaved)");
+    clickButton("Discard");
+    assert.equal(await closing, true);
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+});
+
+test("a hold that never answers does not hold the switch forever", async () => {
+  const h = await harness({ holdMs: 20 });
+  await twoDesktops(h); // on t1
+  const onLeave = (e) => e.detail.hold(new Promise(() => {})); // a hung write
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    await h.workspace.selectTab("t2");
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+  assert.equal(h.workspace.activeTab.id, "t2", "the swap went on");
+  await h.workspace.selectTab("t1");
+  assert.equal(h.workspace.activeTab.id, "t1", "and the next one after it");
 });
 
 test("the tab strip carries no dirty marker at all", async () => {
@@ -1278,6 +1382,21 @@ test("adding a desktop lands on a new empty desk", async () => {
   assert.equal(h.workspace.activeTab.name, "Desktop 2");
   assert.deepEqual(h.doc.boards, []);
   assert.equal(h.sim.stops, 1);
+});
+
+test("duplicating the running desktop copies it AFTER its Stop has kept what it keeps", async () => {
+  const h = await harness();
+  const onLeave = (e) =>
+    e.detail.hold(settle().then(() => h.doc.addAnnotation("note", 0, 0, "kept"))); // prettier-ignore
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    await h.workspace.duplicateTab("t1");
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+  assert.equal(h.workspace.activeTab.name, "Desktop 1 copy");
+  const notes = (h.doc.toJSON().annotations ?? []).map((a) => a.text);
+  assert.deepEqual(notes, ["kept"], "the copy carries it");
 });
 
 test("a duplicate copies the desk on screen, with its own memory", async () => {
@@ -2717,24 +2836,31 @@ test("an imported desktop's chips join the project and the library", async () =>
 
 test("CPU breakpoints are the active desktop's, an edit to the project, and saved with it", async () => {
   const h = await harness();
+  // A CPU on the desk to keep them for (a deleted one's go with it), saved,
+  // so the • below is the breakpoints' own.
+  const board = h.doc.addBoard("pins-full", 0, 0);
+  const cpu = h.doc.addComponent({ kind: "chip", ref: "W65C02", board: board.id, anchor: "e10" }); // prettier-ignore
+  assert.equal(cpu.id, "c1");
+  await h.workspace.save();
+  assert.equal(h.workspace.dirty, false);
   assert.deepEqual(h.workspace.cpuBreakpoints(), {});
   const before = h.announced.count;
   const loads = h.controller.loads.length;
-  h.workspace.setCpuBreakpoints({ c3: [0x8021, 0x8000] });
-  assert.deepEqual(h.workspace.cpuBreakpoints(), { c3: [0x8000, 0x8021] });
+  h.workspace.setCpuBreakpoints({ c1: [0x8021, 0x8000] });
+  assert.deepEqual(h.workspace.cpuBreakpoints(), { c1: [0x8000, 0x8021] });
   assert.equal(h.workspace.dirty, true, "a •, like a rename");
   assert.equal(h.announced.count, before + 1);
   assert.equal(h.controller.loads.length, loads, "the desk is not reloaded");
-  h.workspace.setCpuBreakpoints({ c3: [0x8000, 0x8021] });
+  h.workspace.setCpuBreakpoints({ c1: [0x8000, 0x8021] });
   assert.equal(h.announced.count, before + 1, "unchanged: nothing said");
 
   await h.workspace.save();
   const tab = h.stored().activeTab;
-  assert.deepEqual(h.stored().cpuBreakpoints, { [tab]: { c3: [0x8000, 0x8021] } }); // prettier-ignore
+  assert.deepEqual(h.stored().cpuBreakpoints, { [tab]: { c1: [0x8000, 0x8021] } }); // prettier-ignore
 
   // Another desktop has its own (none), and the first keeps its.
   await h.workspace.addTab();
   assert.deepEqual(h.workspace.cpuBreakpoints(), {});
   await h.workspace.selectTab(tab);
-  assert.deepEqual(h.workspace.cpuBreakpoints(), { c3: [0x8000, 0x8021] });
+  assert.deepEqual(h.workspace.cpuBreakpoints(), { c1: [0x8000, 0x8021] });
 });

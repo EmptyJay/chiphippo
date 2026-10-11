@@ -118,6 +118,9 @@ for (const [channel, event] of [
   ["updater:not-available", "chiphippo:updater-not-available"],
   ["updater:downloaded", "chiphippo:updater-downloaded"],
   ["updater:error", "chiphippo:updater-error"],
+  // An install the user asked for that did not happen (the installer refused,
+  // or Squirrel never had the update ready in time): the app stays open.
+  ["updater:install-failed", "chiphippo:updater-install-failed"],
   // Settings ▸ Appearance ▸ Editor font size, carrying `{ size }`. A push, not
   // something each window polls: the setting is app-wide, and the three
   // auxiliary windows have no settings UI of their own — they only ever follow.

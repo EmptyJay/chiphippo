@@ -445,6 +445,12 @@ function registerSerialIpc(deps) {
 
   return {
     manager,
+    /** Whether a webContents is a connection's log (or Mock) window — the
+        sender policy's question (ipc-guard.js). */
+    isLogWindow: (sender) =>
+      [...logWindows.values()].some(
+        (win) => !win.isDestroyed() && win.webContents === sender,
+      ),
     closeAll: () => manager.close(),
     /** Close every connection window. They are no project's, so New/Open
         leaves them be — but they must not outlive the app window: one left

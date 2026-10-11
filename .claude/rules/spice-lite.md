@@ -207,8 +207,9 @@ maker). The one matrix is a small Newton solve per CLUSTER of nets (below).
   not grown a driver tier for it). An open-collector X beside an open-collector LOW is X +
   `conflict` in the digital engine (it has no strength for "sinking or let go"); Spice
   Lite drops that conflict and SHOWS the net LOW (`wiredLow` in spice/engine.js: every
-  output on the net open-collector, one L, the rest X, no bench source, no diode on the
-  net and no channel onto it that might be on — a joined group's fight is said on ONE
+  output on the net open-collector, one L, the rest X, no bench source, no diode FEEDING
+  the net (its cathode there, or a Zener's anode — a plain diode's anode only sinks; the
+  digital context's diodes carry `zener`) and no channel onto it that might be on — a joined group's fight is said on ONE
   member net, and a HIGH through a diode is no output — AND the solve holding the net
   under the 74LS VIL; a pull-up the LOW cannot hold is still a fight). Only where the net
   would otherwise SHOW the digital X (nobody reads it) is it set L — a read net already

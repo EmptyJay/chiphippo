@@ -193,16 +193,19 @@ export class MemoryBridge {
    * the Stop before this write landed). Whether the bytes were kept.
    * @param {string} compId
    * @param {Uint8Array} bytes - the chip's whole image, packed as its file is
+   * @param {{stillHere?: () => boolean}} [opts] - whether the desk the bytes
+   *   were edited on is still the one on screen when the write comes back:
+   *   if not, nothing on the desk there now is flagged (and it is not kept)
    */
-  async keepRunEdits(compId, bytes) {
-    const kept = await this.#save(compId, bytes);
+  async keepRunEdits(compId, bytes, { stillHere = () => true } = {}) {
+    const kept = await this.#save(compId, bytes, { stillHere });
     if (kept && this.#windows.has(compId)) this.#sendContext(compId);
     return kept;
   }
 
   /** Persist inspector hand-edits to a ROM's file (Save) + flag it programmed.
       Whether they were written. */
-  async #save(compId, bytes) {
+  async #save(compId, bytes, { stillHere = () => true } = {}) {
     if (this.#sim?.running) {
       // The requesting window is told when a run starts and stops, but a Save
       // can cross that message in flight — so this, not the window's own
@@ -220,6 +223,10 @@ export class MemoryBridge {
     const res = await this.#bridge?.mem?.write(info.guid, bytes);
     if (res?.ok === false) {
       this.#warn("danger", t("memory.saveFailed"), res.error);
+      return false;
+    }
+    if (!stillHere()) {
+      console.warn(`[renderer] ${compId}'s kept bytes came back after its desk had gone; not flagged`); // prettier-ignore
       return false;
     }
     // The source file KEEPS its place and is marked instead: it is still where

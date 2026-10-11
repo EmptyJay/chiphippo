@@ -131,7 +131,20 @@ Every benchable 74xx part's demonstration bench, shipped INSIDE the app as
   deleted one comes back alone), with all open the first is selected (`"switched"`); every
   copy is reseated before the project changes, so a failure adds none; the first NEW one
   is landed on and framed. Re-run `make demos` after editing the project in `demos/`, or
-  the guard fails as stale.
+  the guard fails as stale. `validateHandBuilt` runs every clock brick idle LOW (as a
+  run starts it), so a chip clocked by one is not read as floating.
+- **The passives' examples** (2026-10-11): `cap-electrolytic` → `demos/rc.chiphippo`
+  (Fade: one button charges 1000 µF and 220 µF through a 1N4148 each, each LED then
+  fades along its own RC — 4.5× as long; Timer: 10 kΩ · 100 µF into a CD40106B, the
+  LED 0.87 s on / 0.97 s off behind the switch) and `inductor` → `demos/lc.chiphippo`
+  (Ringing: a 1 kHz clock ÷1024 on a CD4040B steps a 680 Ω / 2 × 2.2 kΩ divider into
+  10 H — coil, 3 holes, Lowest winding, ~1 kΩ — and 1 µF: ~49 Hz, ~44 % overshoot,
+  the ring spanning 0.2–4.8 V of the analyzer's lane). Spice Lite ONLY,
+  so engine-parity exempts them (`PASSIVE`) and `tests/spice-rlc-examples.test.js`
+  holds each to its closed form, computed from the parts' own values. The 1 kHz clock
+  is load-bearing: a ringing coil alone is redrawn at 30 frames/s, so it is the
+  clock's ticks that give the analyzer ~40 columns a cycle; the divider keeps the ring
+  inside the analyzer's 0–5 V lane. Authored by a throwaway `builder()` script.
 - **A CPU's example is a whole computer whose program SHIPS IN ITS ROM**
   (`scripts/demo-computers.mjs` `COMPUTERS`, 2026-10-10): W65C02 / Z80A + AT28C256 +
   W65C22 VIA + 16×2 LCD on the VIA's ports + a reset button, typing `Hello World` a

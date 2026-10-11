@@ -578,14 +578,13 @@ in `doc.boards`; a "breadboard" is a **kit** of them placed in one action.
     gesture mid-drag and cancel it.
   - **A drop is resolved from the RELEASE event's own position** (`releaseWorld`), never
     from the last `pointermove` — coalesced moves lag the cursor, and a stale sample
-    silently lost the drop. **The ringed single-point drags (wire end, lead, flag, tag)
-    are the exception**: they commit what the last move showed and never read the
-    release position at all (see "Document model" → single point).
+    silently lost the drop. **The single-point drags (wire end, lead, a two-terminal
+    part's body carried by its pin 1, flag, tag) are the exception**: they commit what
+    the last move showed and never read the release position at all (see "Document
+    model" → single point).
   - **The re-resolve is one function per drag, shared by the move and the release**
     (`#resolveBoardDrag` / `#resolvePartSeat` / `#resolveBrickPos` /
-    `#resolveAnnotationPos` / `#marqueeRect`, and the two resistor trackers, which take the
-    drag as a defaulted argument because the up-handler clears `#mode` before re-resolving)
-    — so preview and drop can never disagree. The part drag is why this matters most: its
+    `#resolveAnnotationPos` / `#marqueeRect`) — so preview and drop can never disagree. The part drag is why this matters most: its
     move handler leaves `d.legal` false for an off-board sample while KEEPING `d.seat`, so a
     fast release silently reverted a legal reseat.
   - Because the listeners outlive the dragged element, **`#rebuildScene` cancels any live

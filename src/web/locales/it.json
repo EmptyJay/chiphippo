@@ -1484,7 +1484,9 @@
     "downloadedVersion": "La versione {version} è stata scaricata.",
     "restart": "Riavvia",
     "upToDate": "Aggiornato",
-    "checkFailed": "Ricerca di aggiornamenti fallita"
+    "checkFailed": "Ricerca di aggiornamenti fallita",
+    "installFailed": "Aggiornamento non installato",
+    "installFailedMessage": "Non è stato possibile installare l'aggiornamento ora, quindi Chip Hippo resta aperto in questa versione. Premi Riavvia per riprovare."
   },
   "bus": {
     "rename": "Rinomina il bus…",

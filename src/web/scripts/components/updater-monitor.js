@@ -89,6 +89,21 @@ export class UpdaterMonitor {
       });
     });
 
+    // A Restart that did not restart: said, because the window simply staying
+    // put explains nothing — and the offer stays, Restart and all, since the
+    // update is still downloaded (a quit installs it only if Squirrel has it,
+    // so that is not promised).
+    window.addEventListener("chiphippo:updater-install-failed", () => {
+      this.#show({
+        variant: "warning",
+        sticky: true,
+        title: t("updater.installFailed"),
+        message: t("updater.installFailedMessage"),
+        actionLabel: t("updater.restart"),
+        onAction: () => window.chiphippo?.updater?.install?.(),
+      });
+    });
+
     window.addEventListener("chiphippo:updater-error", (e) => {
       if (!e.detail?.manual) return;
       this.#show({

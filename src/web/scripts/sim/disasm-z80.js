@@ -25,9 +25,11 @@
 // Under DD/FD, HL becomes IX/IY, (HL) becomes (IX+d), and H/L become the
 // undocumented IXH/IXL — except in an instruction that also uses (IX+d), where
 // H and L stay themselves. A DD/FD in front of an instruction that touches none
-// of those is a NOP of its own (one byte), and the instruction after it is the
-// next line, which is how the silicon runs it. An ED opcode with no
-// instruction is a two-byte NOP.
+// of those (or of another prefix, or ED) is REDUNDANT: the core runs it and the
+// opcode after it as ONE instruction (z80-ops.js `dispatch` — no interrupt is
+// taken between them either), so it is one line here too, the prefix bytes
+// counted in its length and the line marked `illegal`; of a chain of them the
+// last one decides. An ED opcode with no instruction is a two-byte NOP.
 //
 // Memory is read through `read(addr)`, which may answer null for a byte the
 // monitor cannot see; an operand it could not read shows as `??`.
@@ -55,6 +57,9 @@ const BLOCK = [
   ["LDIR", "CPIR", "INIR", "OTIR"],
   ["LDDR", "CPDR", "INDR", "OTDR"],
 ];
+
+/** The most DD/FD prefixes one line takes before it gives up on an opcode. */
+const MAX_PREFIXES = 8;
 
 const hex2 = (v) => (v == null ? "??" : v.toString(16).toUpperCase().padStart(2, "0")); // prettier-ignore
 const hex4 = (v) => (v == null ? "????" : v.toString(16).toUpperCase().padStart(4, "0")); // prettier-ignore
@@ -267,7 +272,7 @@ function decodeMain(op, c, ix, at) {
  * @param {number} addr
  * @returns {{addr: number, length: number, bytes: Array<number|null>,
  *   text: string, mode: string, illegal: boolean}} — `illegal` for an opcode
- *   the Z80 runs as a NOP (an ED hole, a DD/FD with nothing to index)
+ *   the Z80 runs as a NOP (an ED hole) or a DD/FD prefix with nothing to index
  */
 export function disassembleZ80(read, addr) {
   addr &= 0xffff;
@@ -280,28 +285,24 @@ export function disassembleZ80(read, addr) {
     mode: "",
     illegal,
   });
-  const op = c.next();
+  let op = c.next();
   if (op == null) return done("??");
+  // The prefix chain, as the core runs it: each DD/FD is an M1 of its own and
+  // the last one names the index (a memory of nothing but prefixes stops at
+  // MAX_PREFIXES, as a line has to end somewhere).
+  let ix = null;
+  let redundant = false;
+  while (op === 0xdd || op === 0xfd) {
+    redundant ||= ix != null;
+    ix = op === 0xdd ? "IX" : "IY";
+    if (c.bytes.length >= MAX_PREFIXES) return done("NOP", true);
+    op = c.next();
+    if (op == null) return done("??");
+  }
 
   if (op === 0xcb) {
-    const op2 = c.next();
-    return done(op2 == null ? "??" : decodeCB(op2));
-  }
-  if (op === 0xed) {
-    const op2 = c.next();
-    if (op2 == null) return done("??");
-    const text = decodeED(op2, c);
-    return text == null ? done("NOP", true) : done(text);
-  }
-  if (op === 0xdd || op === 0xfd) {
-    const ix = op === 0xdd ? "IX" : "IY";
-    const op2 = read((addr + 1) & 0xffff);
-    if (op2 == null) return done("??");
-    // Another prefix (or ED) after it: this one is a NOP of its own.
-    if (op2 === 0xdd || op2 === 0xfd || op2 === 0xed) return done("NOP", true);
-    if (op2 === 0xcb) {
+    if (ix) {
       // DD CB d op: the displacement comes BEFORE the final opcode.
-      c.next();
       const d = c.next();
       const op3 = c.next();
       if (op3 == null) return done("??");
@@ -314,14 +315,33 @@ export function disassembleZ80(read, addr) {
           ? `${ROT[y]} ${target}`
           : `${["", "BIT", "RES", "SET"][x]} ${y},${target}`;
       // The undocumented forms that also copy the result into r[z].
-      return done(x !== 1 && z !== 6 ? `${base},${R[z]}` : base);
+      return done(x !== 1 && z !== 6 ? `${base},${R[z]}` : base, redundant);
     }
-    const body = cursor(read, (addr + 1) & 0xffff);
-    body.next();
-    const text = decodeMain(op2, body, ix, addr);
-    if (text == null) return done("NOP", true);
-    c.bytes.push(...body.bytes);
-    return done(text);
+    const op2 = c.next();
+    return done(op2 == null ? "??" : decodeCB(op2));
+  }
+  if (op === 0xed) {
+    const op2 = c.next();
+    if (op2 == null) return done("??");
+    const text = decodeED(op2, c);
+    // An index prefix in front of ED has nothing to index.
+    return text == null ? done("NOP", true) : done(text, ix != null);
+  }
+  if (ix) {
+    // Decoded from the opcode's own address, so a relative jump's target
+    // counts the prefixes in front of it.
+    const opAt = (addr + c.bytes.length - 1) & 0xffff;
+    const decode = (index) => {
+      const body = cursor(read, opAt);
+      body.next();
+      return { text: decodeMain(op, body, index, opAt), body };
+    };
+    let { text, body } = decode(ix);
+    const touched = text != null;
+    // Nothing to index: the plain instruction, the prefix run through.
+    if (!touched) ({ text, body } = decode(null));
+    c.bytes.push(...body.bytes.slice(1));
+    return done(text, redundant || !touched);
   }
   return done(decodeMain(op, c, null, addr));
 }

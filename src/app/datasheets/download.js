@@ -47,7 +47,7 @@ const REQUEST_TIMEOUT_MS = 45000;
 
 /** A catalog part id, as strict as main's own pinout-ref rule: this becomes a
     FILE NAME, so nothing with a separator or a dot may pass. */
-const REF_RE = /^[a-z0-9][a-z0-9-]{1,11}$/i;
+const REF_RE = /^[a-z0-9][a-z0-9-]{1,23}$/i;
 
 /** The first bytes of every PDF ever written. */
 const PDF_MAGIC = "%PDF";

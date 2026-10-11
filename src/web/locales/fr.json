@@ -1484,7 +1484,9 @@
     "downloadedVersion": "La version {version} a été téléchargée.",
     "restart": "Redémarrer",
     "upToDate": "À jour",
-    "checkFailed": "Échec de la recherche de mises à jour"
+    "checkFailed": "Échec de la recherche de mises à jour",
+    "installFailed": "Mise à jour non installée",
+    "installFailedMessage": "La mise à jour n'a pas pu être installée pour l'instant, Chip Hippo reste donc ouvert dans cette version. Cliquez sur Redémarrer pour réessayer."
   },
   "bus": {
     "rename": "Renommer le bus…",

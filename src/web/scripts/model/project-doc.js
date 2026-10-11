@@ -116,12 +116,21 @@ function breakpointMap(raw) {
 }
 
 /** The CPU monitor's breakpoints — `{tabId: {compId: [addr…]}}` — pruned to
-    the desktops that exist. */
+    the desktops that exist, and on each to the components still on it: a
+    deleted CPU's list goes with it, rather than waiting in the file for
+    whatever part is next given its id. */
 function breakpointsFor(raw, tabs) {
   const out = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   for (const tab of tabs) {
     const map = breakpointMap(raw[tab.id]);
+    const comps = tab.doc?.components;
+    if (Array.isArray(comps)) {
+      const placed = new Set(comps.map((c) => c?.id));
+      for (const compId of Object.keys(map)) {
+        if (!placed.has(compId)) delete map[compId];
+      }
+    }
     if (Object.keys(map).length) out[tab.id] = map;
   }
   return out;

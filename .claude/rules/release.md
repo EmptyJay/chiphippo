@@ -30,6 +30,19 @@ to turn this on.
   on a normal quit (`autoInstallOnAppQuit`) or through a clicked `quitAndInstall()`, which
   still runs main's ordinary before-quit guard, so an unsaved project is asked about first
   and a cancelled quit leaves the update for next time.
+- **A clicked install that does not happen is taken back, and leaves nothing armed**
+  (`quitAndInstall` in `updater.js`): an error, or no quit within `INSTALL_DEADLINE_MS`,
+  withdraws the close guard's "go" (`app:close-aborted`) and says so
+  (`updater:install-failed` → a sticky `UpdaterMonitor` warning that keeps the Restart
+  offer — a quit installs it only if Squirrel has it, so that is not promised). On macOS the wait for Squirrel
+  to have the update is updater.js's OWN listener on Electron's native
+  `update-downloaded`, removed when the attempt settles — electron-updater's
+  `quitAndInstall` before then hangs one that cannot be taken back, and an attempt given
+  up on would restart the app minutes later, unasked. Whether Squirrel already has it is
+  electron-updater's own `squirrelDownloadedUpdate` (read only when a boolean). A check
+  started during OUR wait FAILS the attempt (guard told) rather than ending it quietly —
+  quiet left the "go" standing with nothing installing. An error from a check that was
+  already running (`errorWasCheck`) is that check's, not the install's.
 - **The updater ANSWERS; it does not decide what to say.** Every lifecycle event is a
   one-way `updater:*` push re-dispatched as `chiphippo:updater-*`, and the renderer owns
   every word: `UpdaterMonitor` (always-on toasts, session-long, ONE shared toast key so the

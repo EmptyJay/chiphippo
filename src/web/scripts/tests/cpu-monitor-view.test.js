@@ -32,7 +32,8 @@ import { partDef } from "../catalog/index.js";
 import { initialCpu } from "../sim/w65c02.js";
 import { cpuOf, cpuSummary, newTrack } from "../sim/cpu-monitor.js";
 
-const { CpuMonitorView } = await import("../components/cpu-monitor-view.js");
+const { CpuMonitorView, escapeClosesWindow } = await import("../components/cpu-monitor-view.js"); // prettier-ignore
+const { PopupManager } = await import("../popup-manager.js");
 const { CpuMonitorBridge, SEND_MS } = await import("../components/cpu-monitor-bridge.js"); // prettier-ignore
 
 /** A W65C02 mid-program: LDA #$42 at $0200 being fetched, Z and C set
@@ -188,7 +189,14 @@ function harness(components, { store, simCalls } = {}) {
     getComponent: (id) => components.find((c) => c.id === id) ?? null,
   };
   const watched = [];
-  const sim = { monitorCpu: (id) => watched.push(id), ...simCalls };
+  const sim = {
+    lastOpts: undefined,
+    monitorCpu(id, opts) {
+      watched.push(id);
+      this.lastOpts = opts;
+    },
+    ...simCalls,
+  };
   let now = 0;
   const pending = [];
   const timers = {
@@ -333,6 +341,26 @@ test("a byte typed over while the run is live is written, and shown at once", ()
   assert.equal(v.sent.length, 2);
 });
 
+test("a byte just typed is not shown on another CPU, or another desk's same id", () => {
+  for (const other of [
+    { compId: "c2", cpus: [...CPUS, { id: "c2", label: "W65C02 · c2" }] },
+    { desk: 1 },
+  ]) {
+    // prettier-ignore
+    const v = liveView();
+    v.press(v.cell(0x0201));
+    v.key("7");
+    v.key("e");
+    assert.equal(v.cell(0x0201).textContent, "7E", "shown at once");
+    v.show(other); // well inside the optimistic window
+    assert.equal(
+      v.cell(0x0201).textContent,
+      "42",
+      "the board's, not the write",
+    );
+  }
+});
+
 test("a stopped run cannot be typed over", () => {
   const v = liveView({ running: false });
   v.press(v.cell(0x0200));
@@ -361,6 +389,21 @@ test("F9, the right-click menu and the line margin set breakpoints; set ones are
   assert.equal(bp.getAttribute("aria-checked"), "false");
   bp.click();
   assert.deepEqual(v.sent.at(-1), { kind: "breakpoint", compId: "c1", addr: 0x0202, on: true }); // prettier-ignore
+});
+
+test("Escape with the right-click menu up closes the menu, not the window", () => {
+  const v = liveView();
+  const escape = () =>
+    new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }); // prettier-ignore
+  assert.equal(escapeClosesWindow(escape()), true, "nothing up: it closes");
+  v.cell(0x0202).dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 })); // prettier-ignore
+  assert.ok(PopupManager.isOpen());
+  // The key reaches the window before the <dialog> turns it into `cancel`.
+  const e = escape();
+  window.dispatchEvent(e);
+  assert.equal(escapeClosesWindow(e), false, "the menu has it");
+  PopupManager.close();
+  assert.equal(escapeClosesWindow(escape()), true);
 });
 
 test("Pause/Continue (F8), Step (F6) and Step Over (F7)", () => {
@@ -509,6 +552,29 @@ test("the breakpoints live in the project: taken up on load, handed back on ever
   assert.deepEqual(h.host.breakpointsOf("c3"), [0x9000]);
 });
 
+test("another desktop whose c1 is another CPU shows nothing of the last one's", async () => {
+  const comps = [chip("c1", "W65C02")];
+  const h = harness(comps);
+  h.fromWindow({ kind: "ready" });
+  await h.tick();
+  h.fromWindow({ kind: "view", compId: "c1", memAt: 0x0200 });
+  h.simState({ running: true, mode: "paused", cpuMonitor: { compId: "c1", kind: "w65c02" } }); // prettier-ignore
+  h.advance(1000);
+  await h.tick();
+  assert.equal(h.toWindow.at(-1).summary.kind, "w65c02");
+  // The desktop swap: the run stopped, then the new document, its c1 a Z80A.
+  h.simState({ running: false, mode: "stopped", cpuMonitor: null });
+  comps.splice(0, 1, chip("c1", "Z80A"));
+  window.dispatchEvent(new CustomEvent("chiphippo:desk-loaded"));
+  h.advance(1000);
+  await h.tick();
+  const msg = h.toWindow.at(-1);
+  assert.equal(msg.compId, "c1");
+  assert.equal(msg.summary, null, "not the 6502's memory under the Z80's tab");
+  assert.equal(h.watched.at(-1), "c1", "watched afresh");
+  assert.equal(h.sim.lastOpts, null, "around its PC, not the old pin");
+});
+
 test("a breakpoint that pauses the run raises the window on its CPU", async () => {
   const h = harness([chip("c3", "W65C02"), chip("c9", "Z80A")]);
   window.dispatchEvent(new CustomEvent("chiphippo:cpu-break", { detail: { compId: "c9", addr: 0x0100, paused: true } })); // prettier-ignore
@@ -607,6 +673,37 @@ test("ticked, the ROMs edited during the run are saved at Stop — never an SRAM
   h.stop();
   await h.tick();
   assert.deepEqual(h.saved, [["c2", [0xea]]], "only what this run edited");
+});
+
+test("a desktop swap's Stop holds the swap until the edits are kept, on the desk being left", async () => {
+  const h = keepHarness({ keepEdits: true });
+  h.run();
+  const holds = [];
+  const leave = (detail) =>
+    window.dispatchEvent(new CustomEvent("chiphippo:desk-leaving", { detail })); // prettier-ignore
+  leave({ project: false, hold: (p) => holds.push(p) });
+  h.stop(); // the swap's own Stop, in the same task
+  assert.equal(holds.length, 1, "the swap waits for the keep");
+  await Promise.all(holds);
+  assert.deepEqual(h.saved, [["c2", [0xea]]]);
+  assert.match(h.toasts[0].message, /AT28C256 · c2/);
+  // A plain Stop later is not taken for a swap's.
+  await h.tick();
+  h.run();
+  h.stop();
+  await h.tick();
+  assert.equal(holds.length, 1);
+  assert.equal(h.saved.length, 2);
+});
+
+test("a project swap's Stop keeps nothing — that project is already saved or discarded", async () => {
+  const h = keepHarness({ keepEdits: true });
+  h.run();
+  window.dispatchEvent(new CustomEvent("chiphippo:desk-leaving", { detail: { project: true, hold: () => assert.fail("nothing to hold") } })); // prettier-ignore
+  h.stop();
+  await h.tick();
+  assert.deepEqual(h.saved, []);
+  assert.deepEqual(h.toasts, []);
 });
 
 test("the window's checkbox sets it, is persisted, and is shown back", async () => {
@@ -806,6 +903,23 @@ test("paused at an instruction's start, a register is typed over and a flag flip
   v.show({ mode: "running" });
   assert.equal(reg("A"), null);
   assert.equal(hint(), "");
+});
+
+test("a digit a register cannot hold is refused, never shown as written", () => {
+  const v = liveView();
+  const summary = summary6502();
+  // The Z80's IM: one digit, at most 2 (what the core's setRegister takes).
+  summary.view.registers.push({ name: "IM", value: 1, digits: 1, max: 2 });
+  v.show({ summary });
+  const reg = (name) => v.root.querySelector(`.cpumon-reg[data-reg="${name}"]`);
+  v.press(reg("IM"));
+  v.key("f");
+  v.key("3");
+  assert.equal(v.sent.filter((m) => m.kind === "set-register").length, 0);
+  assert.equal(reg("IM").querySelector(".cpumon-reg-value").textContent, "1", "unchanged, still selected"); // prettier-ignore
+  assert.ok(reg("IM").classList.contains("cpumon-reg--selected"));
+  v.key("2");
+  assert.deepEqual(v.sent.at(-1), { kind: "set-register", compId: "c1", name: "IM", value: 2 }); // prettier-ignore
 });
 
 test("paused, what the run changed since it last paused is lit", () => {

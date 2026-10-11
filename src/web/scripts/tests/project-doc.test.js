@@ -411,6 +411,24 @@ test("CPU breakpoints are kept per desktop, cleaned, and are an edit to the FILE
   assert.equal("cpuBreakpoints" in projectForFile(gone), false);
 });
 
+test("a deleted CPU's breakpoints leave the file with it", () => {
+  const cpu = (id) => ({ id, kind: "chip", ref: "W65C02", board: "bb1", anchor: "e10", params: {} }); // prettier-ignore
+  const withCpus = (...ids) => ({ ...doc(), components: ids.map(cpu) });
+  let meta = normalizeProject({
+    name: "Test",
+    activeTab: "t1",
+    nextIndex: 2,
+    tabs: [{ id: "t1", name: "One", doc: withCpus("c3", "c4") }],
+  });
+  meta = setCpuBreakpoints(meta, "t1", { c3: [1], c4: [2] });
+  assert.deepEqual(projectForFile(meta).cpuBreakpoints, { t1: { c3: [1], c4: [2] } }); // prettier-ignore
+  // c4 deleted from the desk: gone from what is saved, and from what is read.
+  const deleted = { ...meta, tabs: [{ ...meta.tabs[0], doc: withCpus("c3") }] };
+  assert.deepEqual(projectForFile(deleted).cpuBreakpoints, { t1: { c3: [1] } });
+  const read = normalizeProject({ ...projectForFile(deleted), cpuBreakpoints: { t1: { c3: [1], c4: [2] } } }); // prettier-ignore
+  assert.deepEqual(read.cpuBreakpoints, { t1: { c3: [1] } });
+});
+
 test("a duplicated desktop keeps its CPUs' breakpoints", () => {
   const meta = setCpuBreakpoints(project("One"), "t1", { c3: [0x8000] });
   const { meta: next, tab } = duplicateDesktop(meta, "t1", doc(5));

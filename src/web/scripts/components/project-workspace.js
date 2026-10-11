@@ -133,6 +133,10 @@ import {
  */
 const AUTO_SAVE_MS = 30_000;
 
+/** The longest a desk swap waits for what its Stop holds it for (a kept ROM
+    edit's write — milliseconds, unless the disk has stopped answering). */
+export const HOLD_MS = 10_000;
+
 /** The one extra field the Properties dialog shows for a PROJECT. A function
     rather than a frozen constant because its label is translated, and `t()` must
     never run at module scope (see i18n.js). */
@@ -190,9 +194,11 @@ export class ProjectWorkspace {
   #stashed = null; // …as the RECOVERY SLOT holds it → what the tick watches
   #locked = false; // editing frozen (the circuit is running)
   #examples = new Map(); // ref → the in-flight openExample promise
+  #swaps = Promise.resolve(); // the desk swaps asked for, run one at a time
   #inFlight = null; // the write chain's tail, or null when nothing is writing
   #busy = false; // a leave/quit question is out, or a project is being swapped
   #autoSaveMs = 0; // 0 = off
+  #holdMs = HOLD_MS; // see #stopForSwap
   #autoTimer = null;
   #autoStopped = false; // the app is going away; nothing more may write
   #autoSaveFailed = false; // one quiet failure retires it (see autoSaveNow)
@@ -301,6 +307,7 @@ export class ProjectWorkspace {
     onProjectAdopted,
     onNewProject,
     autoSaveMs = AUTO_SAVE_MS,
+    holdMs = HOLD_MS,
   }) {
     this.#bridge = bridge;
     this.#deskDoc = deskDoc;
@@ -317,6 +324,7 @@ export class ProjectWorkspace {
     this.#onProjectAdopted = onProjectAdopted;
     this.#onNewProject = onNewProject;
     this.#autoSaveMs = Number(autoSaveMs) > 0 ? Number(autoSaveMs) : 0;
+    this.#holdMs = Number(holdMs) >= 0 ? Number(holdMs) : HOLD_MS;
     this.#library = boot?.library ?? [];
     if (boot?.project) {
       this.#adopt(boot.project);
@@ -1104,10 +1112,34 @@ export class ProjectWorkspace {
 
   // ── Desktops ────────────────────────────────────────────────────────────
 
+  /**
+   * Run a desk SWAP — anything that leaves the desk on screen for another —
+   * after every swap already asked for has finished, never across one.
+   *
+   * A leave waits (`#stopForSwap`: the Stop's kept ROM edits land in the desk
+   * they belong to, then it is stashed), and a second click meanwhile ran its
+   * own leave to the end first: the first's write then landed in the THIRD
+   * desktop, and its late load put the second on screen over the one clicked
+   * last. One at a time, each swap reads the project as the one before left
+   * it, and the last click is the desk you get. A swap that fails lets the
+   * next one run.
+   * @template T
+   * @param {() => Promise<T>} run
+   * @returns {Promise<T>}
+   */
+  #oneSwapAtATime(run) {
+    const turn = this.#swaps.then(run);
+    this.#swaps = turn.catch(() => {});
+    return turn;
+  }
+
   /** Add a desktop: the next "Desktop N", empty, and land on it. */
-  async addTab() {
+  addTab() {
+    return this.#oneSwapAtATime(() => this.#addTab());
+  }
+
+  async #addTab() {
     if (!this.#project) return;
-    this.#stash();
     await this.#leaveActiveDesk();
     this.#project = addDesktop(this.#project, canonical(emptyDocument())).meta;
     this.#loadActive();
@@ -1116,11 +1148,14 @@ export class ProjectWorkspace {
   }
 
   /** Put another desktop on the desk. */
-  async selectTab(id) {
+  selectTab(id) {
+    return this.#oneSwapAtATime(() => this.#selectTab(id));
+  }
+
+  async #selectTab(id) {
     if (!this.#project || id === this.#project.activeTab) return;
     if (!findDesktop(this.#project, id)) return;
-    this.#stash(); // the desk being left, exactly as it stands
-    await this.#leaveActiveDesk();
+    await this.#leaveActiveDesk(); // stashes the desk being left
     this.#project = setActiveDesktop(this.#project, id);
     this.#loadActive();
     this.#renderTabs();
@@ -1132,10 +1167,17 @@ export class ProjectWorkspace {
    * chip onto a fresh GUID and a fresh backing file, so the copy can never
    * share bytes with the original.
    */
-  async duplicateTab(id) {
+  duplicateTab(id) {
+    return this.#oneSwapAtATime(() => this.#duplicateTab(id));
+  }
+
+  async #duplicateTab(id) {
     const tab = this.#project ? findDesktop(this.#project, id) : null;
     if (!tab) return;
-    this.#stash(); // so duplicating the ACTIVE desktop copies what is on screen
+    // The leave FIRST — its Stop, the edits it keeps landing in the desk, and
+    // the stash — so duplicating the ACTIVE desktop copies what is on screen,
+    // kept ROM bytes and all (main copies each ROM's file as it stands).
+    await this.#leaveActiveDesk();
     let res;
     try {
       res = await this.#bridge.desktop.duplicate(
@@ -1145,10 +1187,8 @@ export class ProjectWorkspace {
       this.#fail(t("workspace.failDuplicate"), err);
       return;
     }
-    const next = duplicateDesktop(this.#project, id, canonical(res?.doc));
-    if (!next) return;
-    await this.#leaveActiveDesk();
-    this.#project = next.meta;
+    const copy = canonical(res?.doc);
+    this.#project = duplicateDesktop(this.#project, id, copy).meta;
     this.#loadActive();
     this.#renderTabs();
     this.#announce();
@@ -1159,7 +1199,11 @@ export class ProjectWorkspace {
    * as a NEW desktop. Always an addition — no file operation can replace the
    * desk you are looking at.
    */
-  async importTab() {
+  importTab() {
+    return this.#oneSwapAtATime(() => this.#importTab());
+  }
+
+  async #importTab() {
     if (!this.#project) return;
     let res;
     try {
@@ -1196,13 +1240,12 @@ export class ProjectWorkspace {
       this.#joinLibrary(added);
       this.#applyCustomChips();
     }
-    const next = importDesktop(this.#project, {
+    await this.#leaveActiveDesk();
+    this.#project = importDesktop(this.#project, {
       name: res.name,
       description: res.description,
       doc: canonical(merged.doc),
-    });
-    await this.#leaveActiveDesk();
-    this.#project = next.meta;
+    }).meta;
     this.#loadActive();
     this.#renderTabs();
     this.#announce();
@@ -1250,7 +1293,9 @@ export class ProjectWorkspace {
     // are separated by awaits, which is exactly where a duplicate gets in.
     const inFlight = this.#examples.get(ref);
     if (inFlight) return inFlight;
-    const run = this.#addExample(ref).finally(() => this.#examples.delete(ref));
+    const run = this.#oneSwapAtATime(() => this.#addExample(ref)).finally(() =>
+      this.#examples.delete(ref),
+    );
     this.#examples.set(ref, run);
     return run;
   }
@@ -1275,7 +1320,7 @@ export class ProjectWorkspace {
     const missing = desktops.filter((d) => !tabNamed(d.name));
     if (!missing.length) {
       // a no-op when it is already on the desk
-      await this.selectTab(tabNamed(desktops[0].name).id);
+      await this.#selectTab(tabNamed(desktops[0].name).id); // already our turn
       return "switched";
     }
     // A COPIED desktop is reseated, with no exception: "two chips can never
@@ -1300,10 +1345,11 @@ export class ProjectWorkspace {
       if (!doc) return failed(new Error("the example could not be prepared"));
       copies.push({ ...desktop, doc: canonical(doc) });
     }
-    // Whether the project held unsaved work before any of this — read after
-    // the awaits above, so it is the state the additions actually land on.
+    await this.#leaveActiveDesk();
+    // Whether the project held unsaved work before the additions — read after
+    // the awaits above and the leave (whose Stop may have written into the
+    // desk it left), so it is the state the additions actually land on.
     const wasDirty = this.dirty;
-    this.#stash();
     let meta = this.#project;
     let first = null;
     for (const { name, description, doc } of copies) {
@@ -1311,7 +1357,6 @@ export class ProjectWorkspace {
       meta = next.meta;
       first ??= next.tab.id;
     }
-    await this.#leaveActiveDesk();
     this.#project = setActiveDesktop(meta, first);
     this.#loadActive();
     this.#frameLoaded();
@@ -1416,7 +1461,7 @@ export class ProjectWorkspace {
       message: t("workspace.deleteTabMessage"),
       confirmLabel: t("common.delete"),
       confirmClass: "btn--danger",
-      onConfirm: () => void this.#doDeleteTab(id),
+      onConfirm: () => void this.#oneSwapAtATime(() => this.#doDeleteTab(id)),
     });
   }
 
@@ -1506,9 +1551,14 @@ export class ProjectWorkspace {
     this.#stashed = this.#saved; // nothing pending, so nothing to re-stash
   }
 
-  /** Put a just-opened/just-created project on the desk. */
-  async #swapProject(raw, onArrived = null) {
-    this.#stopForSwap();
+  /** Put a just-opened/just-created project on the desk — after any desktop
+      swap still under way (`#oneSwapAtATime`). */
+  #swapProject(raw, onArrived = null) {
+    return this.#oneSwapAtATime(() => this.#swapProjectNow(raw, onArrived));
+  }
+
+  async #swapProjectNow(raw, onArrived) {
+    await this.#stopForSwap({ project: true });
     await this.#closeAuxWindows();
     if (!this.#adopt(raw)) {
       this.#fail(t("workspace.failOpen"), new Error(t("workspace.noDesktops")));
@@ -1637,16 +1687,37 @@ export class ProjectWorkspace {
    * left pointing at a chip that is no longer there.
    */
   async #leaveActiveDesk() {
-    this.#stopForSwap();
+    await this.#stopForSwap();
+    // AFTER the Stop has finished with it: what the Stop writes into the desk
+    // (a ROM's run edits kept, its chip flagged) belongs to the desktop left.
+    this.#stash();
     await this.#closeAuxWindows();
   }
 
-  /** Stop the run because the desk is about to be SWAPPED — said first
-      (`chiphippo:desk-leaving`), so what waits for a Stop to act on this desk
-      (a build held mid-run) waits for the desk that arrives instead. */
-  #stopForSwap() {
-    window.dispatchEvent(new CustomEvent("chiphippo:desk-leaving"));
+  /**
+   * Stop the run because the desk is about to be SWAPPED — said first
+   * (`chiphippo:desk-leaving`), so what waits for a Stop to act on this desk
+   * (a build held mid-run) waits for the desk that arrives instead. `project`
+   * says the whole project is going (already saved or discarded, so nothing
+   * may write into it); otherwise what the Stop does to the desk it ends can
+   * `hold(promise)` the swap until it is done — the desk stays on screen, and
+   * is only stashed and replaced once that has landed in it.
+   */
+  async #stopForSwap({ project = false } = {}) {
+    const holds = [];
+    const hold = (promise) => holds.push(promise);
+    window.dispatchEvent(
+      new CustomEvent("chiphippo:desk-leaving", { detail: { project, hold } }),
+    );
     this.#sim?.stop?.();
+    if (!holds.length) return;
+    // Not forever: a write that never answers must not hold every switch
+    // after it. Past HOLD_MS (`holdMs`) the swap goes on; a write landing later finds its
+    // desk gone and flags nothing (MemoryBridge `keepRunEdits` `stillHere`).
+    let timer = null;
+    const late = new Promise((r) => (timer = setTimeout(r, this.#holdMs)));
+    await Promise.race([Promise.allSettled(holds), late]);
+    clearTimeout(timer);
   }
 
   /** Put the active desktop's document on the desk, with its own history. */
@@ -1891,7 +1962,16 @@ export class ProjectWorkspace {
    * @param {{quitting?: boolean}} [opts]
    * @returns {Promise<boolean>} whether to proceed.
    */
-  #confirmLeaveProject({ quitting = false } = {}) {
+  async #confirmLeaveProject({ quitting = false } = {}) {
+    // A desktop swap still under way (its Stop's kept ROM edits being written
+    // into the desk it leaves) finishes first: the question — and the save it
+    // may lead to — is then about the project as it will stand, not one with
+    // that write still to land after it.
+    await this.#swaps;
+    return this.#askLeave(quitting);
+  }
+
+  #askLeave(quitting) {
     if (!this.#project) return Promise.resolve(true);
     if (this.isUntitled && !quitting) {
       // Let go outright, not left to the dirty test below: a pristine project

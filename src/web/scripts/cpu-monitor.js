@@ -26,7 +26,10 @@
 
 import * as i18n from "./i18n.js";
 import { followFontSize } from "./font-scale.js";
-import { CpuMonitorView } from "./components/cpu-monitor-view.js";
+import {
+  CpuMonitorView,
+  escapeClosesWindow,
+} from "./components/cpu-monitor-view.js";
 
 const bridge = window.chiphippo;
 
@@ -50,12 +53,10 @@ window.addEventListener("chiphippo:cpumonitor-inbound", (e) => {
   view.receive(e.detail);
 });
 
-// Escape closes it, as it does the memory inspector — unless the view used it
-// (a typed digit dropped, a selection let go), or the CPU picker has the key
-// (there it closes the picker's list).
+// Escape closes it, as it does the memory inspector (escapeClosesWindow says
+// when it does not).
 window.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || e.defaultPrevented) return;
-  if (!e.target?.closest?.("select")) window.close();
+  if (escapeClosesWindow(e)) window.close();
 });
 
 bridge?.cpuMonitor?.toHost({ kind: "ready" })?.catch?.(() => {});

@@ -99,6 +99,8 @@ export class CpuMonitorBridge {
   #saveRom;
   #notifications;
   #editedRoms = new Set(); // ROMs poked during this run
+  #leaving = null; // a swap's `desk-leaving` detail, until its Stop has run
+  #desk = 0; // counts documents put on the desk (the window's `desk`)
   #queued = false;
 
   /**
@@ -110,7 +112,7 @@ export class CpuMonitorBridge {
    * @param {object} [opts.timers] - `{now, set, clear}` (tests)
    * @param {boolean} [opts.keepEdits] - the checkbox's saved setting
    * @param {(on: boolean) => void} [opts.onKeepEdits] - persist it
-   * @param {(compId: string, bytes: Uint8Array) => Promise<boolean>} [opts.saveRom]
+   * @param {(compId: string, bytes: Uint8Array, opts?: {stillHere: () => boolean}) => Promise<boolean>} [opts.saveRom]
    *   - keep a ROM's final bytes (MemoryBridge `keepRunEdits`)
    * @param {import('./notification-stack.js').NotificationStack} [opts.notifications]
    * @param {{load: () => Record<string, number[]>,
@@ -140,6 +142,11 @@ export class CpuMonitorBridge {
     window.addEventListener("chiphippo:mem-state", (e) =>
       this.#onMemState(e.detail),
     );
+    // A Stop that is a swap's comes straight after this, in the same task.
+    window.addEventListener("chiphippo:desk-leaving", (e) => {
+      this.#leaving = e.detail ?? {};
+      queueMicrotask(() => (this.#leaving = null));
+    });
     window.addEventListener("chiphippo:cpumonitor-host-inbound", (e) =>
       this.#receive(e.detail),
     );
@@ -148,10 +155,9 @@ export class CpuMonitorBridge {
     );
     const onDesk = () => this.#onDeskChanged();
     window.addEventListener("chiphippo:doc-changed", onDesk);
-    window.addEventListener("chiphippo:desk-loaded", () => {
-      this.#loadBreakpoints();
-      onDesk();
-    });
+    window.addEventListener("chiphippo:desk-loaded", () =>
+      this.#onDeskLoaded(),
+    );
     window.addEventListener("chiphippo:cpu-break", (e) =>
       this.#onBreak(e.detail),
     );
@@ -273,22 +279,36 @@ export class CpuMonitorBridge {
     this.#editedRoms = new Set();
     if (edited.size) this.#sendSoon();
     if (!this.#keepEdits || !this.#saveRom) return;
+    // A Stop that is a swap's: a PROJECT on its way out has been saved or
+    // discarded already — nothing may write into it now. A DESKTOP being left
+    // waits for the keep (`hold`), so the chip it flags is the one the run
+    // edited, on the desktop being left, before that is stashed and replaced.
+    const leaving = this.#leaving;
+    if (leaving?.project) return;
     for (const compId of edited) {
       const bytes = detail?.images?.get(compId);
-      if (bytes) this.#keep(compId, bytes);
+      if (!bytes) continue;
+      const kept = this.#keep(compId, bytes);
+      leaving?.hold?.(kept);
     }
   }
 
   async #keep(compId, bytes) {
+    // Named now, while the desk the run edited is the one on screen.
+    const comp = this.#deskDoc?.getComponent?.(compId);
+    const def = comp ? partDef(comp.ref) : null;
+    // The desk it was edited on: a write that comes back after that desk has
+    // gone (a swap that stopped waiting for it) flags nothing on the next.
+    const desk = this.#desk;
     let kept = false;
     try {
-      kept = await this.#saveRom(compId, bytes);
+      kept = await this.#saveRom(compId, bytes, {
+        stillHere: () => this.#desk === desk,
+      });
     } catch (err) {
       console.error("[renderer] keeping CPU monitor edits failed:", err);
     }
     if (!kept) return;
-    const comp = this.#deskDoc?.getComponent?.(compId);
-    const def = comp ? partDef(comp.ref) : null;
     this.#notifications?.notify?.({
       key: `cpumon-kept:${compId}`,
       variant: "info",
@@ -385,6 +405,18 @@ export class CpuMonitorBridge {
     this.#sendSoon();
   }
 
+  /** Another document on the desk. Whatever was shown belongs to the desk
+      that left — even under the same id, which there may name another CPU
+      altogether: its memory, registers and breakpoint lines go with it. */
+  #onDeskLoaded() {
+    this.#desk += 1;
+    this.#loadBreakpoints();
+    this.#summary = null;
+    this.#memAt = null;
+    this.#onDeskChanged();
+    if (this.#ready && this.#compId) this.#watch();
+  }
+
   /** An edit or another desktop: the CPU shown may have gone. */
   #onDeskChanged() {
     if (this.#compId != null && !this.#isCpu(this.#compId)) {
@@ -431,6 +463,7 @@ export class CpuMonitorBridge {
         kind: "state",
         cpus: this.#cpus(),
         compId: this.#compId,
+        desk: this.#desk,
         running: this.#running,
         mode: this.#mode,
         summary: this.#summary,

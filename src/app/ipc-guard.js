@@ -20,32 +20,45 @@
 // ipc-guard.js — WHICH WINDOW may ask main for WHAT. Every window loads the
 // one preload, so every window can reach every channel it exposes; the
 // navigation guard and the CSP keep a foreign page out of all of them, and
-// this is the second line: a channel that writes the user's files, opens
-// their projects, programs a ROM or installs an update answers the APP
-// window only, and the few an auxiliary window really uses answer that
-// window (a memory inspector its OWN chip; the chip designer only its own
-// layout settings; the CPU monitor only its own messages to the app).
+// this is the second line. DENY BY DEFAULT: the app window may call anything
+// (but another window's reports to it), and an auxiliary window only the few
+// channels it really uses, listed below by window — so a channel added later
+// answers the app window alone until someone says otherwise. A memory
+// inspector speaks for its OWN chip and reads its own chip's file; the chip
+// designer writes only its own layout settings.
 //
 // `senderAllowed` is the policy, pure so it unit-tests without Electron;
 // `guardIpcMain` puts it in front of every handler registered after it, so
 // the `ipcMain.handle("…")` calls stay what the parity test reads.
 "use strict";
 
-/** Channels only the app window may call. */
-const APP_ONLY = [
-  /^project:/,
-  /^desktop:/,
-  /^updater:install$/,
-  /^chipdesign:open$/,
-  /^cpumonitor:(open|to-window)$/,
-  /^memory:(open|to-inspector)$/,
-  /^mem:(create|program|write|delete|path|pick-image)$/,
-  // A real USB port, a download into a folder of the user's, a file written
-  // where a dialog pointed: the app window's work alone.
-  /^serial:(open|send|close)$/,
-  /^datasheet:download$/,
-  /^integration:save-file$/,
-];
+/** What every window reads: its language and its text size. */
+const EVERY_WINDOW = new Set(["i18n:load", "settings:get"]);
+
+/** What each auxiliary window calls beyond that (its own entry script and
+    what it imports — tests/ipc-guard.test.js holds the lists to the code). */
+const AUX_CHANNELS = Object.freeze({
+  pinout: new Set([
+    "pinout:chip",
+    "pinout:open-designer",
+    "datasheet:open",
+    "demo:open",
+  ]),
+  docs: new Set(["docs:read"]),
+  serialLog: new Set([
+    "serial:log:read",
+    "serial:log:clear",
+    "serial:log:prefs",
+    "serial:log:save",
+    "serial:log:min-width",
+    "serial:mock:send",
+    "serial:mock:log",
+    "serial:mock:fault",
+  ]),
+  memory: new Set(["mem:load", "mem:export"]),
+  chipDesigner: new Set(["settings:set"]),
+  cpuMonitor: new Set(),
+});
 
 /** What a refused call answers — the shape every guarded handler already
     uses for a failure, so a caller (there should be none) reads a refusal. */
@@ -62,26 +75,44 @@ function designerPatch(raw) {
   return keys.length > 0 && keys.every((k) => /^chipDesigner[A-Z]/.test(k));
 }
 
+/** Which auxiliary window `who` is, or null (unknown: nothing beyond
+    EVERY_WINDOW). */
+function auxKind(who) {
+  if (who.memoryCompId != null) return "memory";
+  if (who.isChipDesigner) return "chipDesigner";
+  if (who.isCpuMonitor) return "cpuMonitor";
+  if (who.isPinout) return "pinout";
+  if (who.isDocs) return "docs";
+  if (who.isSerialLog) return "serialLog";
+  return null;
+}
+
 /**
  * May the window `who` call `channel` with `args`?
  * @param {string} channel
  * @param {unknown[]} args
- * @param {{isApp: boolean, memoryCompId: string|null, isChipDesigner: boolean, isCpuMonitor?: boolean}} who
+ * @param {{isApp: boolean, memoryCompId: string|null, memoryGuid?: string|null,
+ *   isChipDesigner: boolean, isCpuMonitor?: boolean, isPinout?: boolean,
+ *   isDocs?: boolean, isSerialLog?: boolean}} who
  */
 function senderAllowed(channel, args, who) {
-  if (APP_ONLY.some((re) => re.test(channel))) return who.isApp;
-  if (channel === "mem:load" || channel === "mem:export") {
-    return who.isApp || who.memoryCompId != null;
-  }
-  // An inspector speaks for its OWN chip, never another's.
+  // A window's reports to the app are its own — never another's, the app's
+  // included. An inspector speaks for its OWN chip, never another's.
   if (channel === "memory:to-host") {
     return who.memoryCompId != null && who.memoryCompId === args[0];
   }
-  // The CPU monitor's reports to the app (which CPU to show) — its own.
   if (channel === "cpumonitor:to-host") return who.isCpuMonitor === true;
-  if (channel === "settings:set") {
-    return who.isApp || (who.isChipDesigner && designerPatch(args[0]));
+  if (channel === "chipdesign:to-host") return who.isChipDesigner === true;
+  if (who.isApp) return true;
+  if (EVERY_WINDOW.has(channel)) return true;
+  const kind = auxKind(who);
+  if (!kind || !AUX_CHANNELS[kind].has(channel)) return false;
+  // An inspector reads its OWN chip's file (named by the context the app
+  // relayed it), never another chip's.
+  if (channel === "mem:load") {
+    return who.memoryGuid != null && args[0] === who.memoryGuid;
   }
+  if (channel === "settings:set") return designerPatch(args[0]);
   return true;
 }
 
@@ -89,7 +120,7 @@ function senderAllowed(channel, args, who) {
  * Put the policy in front of every handler `ipcMain.handle` registers from
  * here on. `identify(sender)` says which window a webContents is.
  * @param {{handle: Function}} ipcMain
- * @param {(sender: object) => {isApp: boolean, memoryCompId: string|null, isChipDesigner: boolean, isCpuMonitor?: boolean}} identify
+ * @param {(sender: object) => object} identify - the `who` senderAllowed reads
  */
 function guardIpcMain(ipcMain, identify) {
   const register = ipcMain.handle.bind(ipcMain);
@@ -101,4 +132,4 @@ function guardIpcMain(ipcMain, identify) {
     );
 }
 
-module.exports = { senderAllowed, guardIpcMain, FORBIDDEN };
+module.exports = { senderAllowed, guardIpcMain, FORBIDDEN, AUX_CHANNELS };

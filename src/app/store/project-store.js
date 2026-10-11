@@ -253,6 +253,7 @@ class ProjectStore {
     this._saves = path.join(dataDir, SAVES_DIR);
     this._memory = path.join(dataDir, MEMORY_DIR);
     this._desk = deskStore;
+    this._slotHeld = false; // see holdDefaultProject
   }
 
   /** The app's saves directory (created on demand — see `ensureSaves`). */
@@ -318,6 +319,7 @@ class ProjectStore {
     this.ensureSaves();
     // There is ONE working slot, and this takes it over. Nothing but the file
     // itself has to go now: a project has no companion files to collect.
+    // (A HELD slot is not taken: the project is written nowhere until Save As.)
     this.removeDefaultProject();
     const meta = {
       version: PROJECT_VERSION,
@@ -327,7 +329,7 @@ class ProjectStore {
       nextIndex: 2,
       tabs: [{ id: "t1", name: "Desktop 1", doc: defaultDeskDocument() }],
     };
-    this.write(this.defaultProjectPath, meta);
+    if (!this._slotHeld) this.write(this.defaultProjectPath, meta);
     return { ...meta, location: null };
   }
 
@@ -395,6 +397,9 @@ class ProjectStore {
    * however many chips across however many desktops hold the same image.
    */
   write(filePath, meta, { recoveryFor = null } = {}) {
+    if (this._slotHeld && this._isSlot(filePath)) {
+      throw taggedError("the working slot holds unread work", "SLOT_HELD");
+    }
     const clean = this._normalize(meta);
     if (!clean) throw taggedError("a project needs a desktop", "INVALID_ARG");
     const { images, blobs } = collectImages(clean, this._memory);
@@ -640,7 +645,42 @@ class ProjectStore {
    * @returns {boolean} whether a file was deleted.
    */
   removeDefaultProject() {
+    if (this._slotHeld) return false;
     return unlinkSafe(this.defaultProjectPath);
+  }
+
+  /**
+   * Leave the working slot ALONE for the rest of the session: a recovery that
+   * could not be read, and could not be moved aside either, may hold the only
+   * copy of the work. Nothing then writes or removes it — a new project lives
+   * nowhere until Save As, an autosave into it fails (and retires quietly),
+   * and the next launch tries to read it again.
+   */
+  holdDefaultProject() {
+    this._slotHeld = true;
+  }
+
+  _isSlot(filePath) {
+    return (
+      typeof filePath === "string" &&
+      path.resolve(filePath) === path.resolve(this.defaultProjectPath)
+    );
+  }
+
+  /**
+   * Move the working slot ASIDE, under a name of its own beside it, rather
+   * than delete it: a recovery that could not be READ (an I/O failure, not a
+   * damaged file) may hold the only copy of the work, and the slot is about to
+   * become the next project's home, whose first autosave would write over it.
+   * Where it went, or null when there was nothing to move. Throws when the
+   * move itself fails — the caller must then leave the slot alone.
+   */
+  setAsideDefaultProject() {
+    const from = this.defaultProjectPath;
+    if (!existsSafe(from)) return null;
+    const to = `${from}.unread-${Date.now()}`;
+    fs.renameSync(from, to);
+    return to;
   }
 
   /**

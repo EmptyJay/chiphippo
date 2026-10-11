@@ -388,7 +388,7 @@ test("brick drag: the PSU lands at the release point, element included", () => {
 
 // ── Resistor drags (rigid body, and one end) ────────────────────────────────
 
-test("resistor body drag: the rigid delta is taken at the release point", () => {
+test("resistor body drag: the drop is the seat the last move SHOWED, not the release point", () => {
   resetDom();
   const doc = new DeskDoc(null);
   doc.addBoard("pins-full", 0, 0);
@@ -398,11 +398,45 @@ test("resistor body drag: the rigid delta is taken at the release point", () => 
 
   dragReleasingAt(partEl(surface, r.id), world, {
     from: { x: 0, y: 0 },
-    stale: { x: 1, y: 0 }, // would land e11
-    at: { x: 2, y: 0 }, // let go one pitch further
+    stale: { x: 1, y: 0 }, // drawn seated at e11
+    at: { x: 2, y: 0 }, // the up event, one pitch on — never re-read
   });
 
-  assert.equal(doc.getComponent(r.id).anchor, "e12");
+  assert.equal(doc.getComponent(r.id).anchor, "e11");
+});
+
+test("resistor body drag: a release out of every hole's reach drops the seat shown", () => {
+  resetDom();
+  const doc = new DeskDoc(null);
+  doc.addBoard("pins-full", 0, 0);
+  const world = { x: 0, y: 0 };
+  const { surface, controller } = makeDesk(doc, world);
+  const r = controller.addComponentAt("resistor", "bb1", "e10"); // e10 ── e13
+
+  dragReleasingAt(partEl(surface, r.id), world, {
+    from: { x: 0, y: 0 },
+    stale: { x: 3, y: 0 }, // drawn seated at e13
+    at: { x: 200, y: 200 }, // bare desk
+  });
+
+  assert.equal(doc.getComponent(r.id).anchor, "e13");
+});
+
+test("resistor body drag: a refused last move reverts, wherever the button comes up", () => {
+  resetDom();
+  const doc = new DeskDoc(null);
+  doc.addBoard("pins-full", 0, 0);
+  const world = { x: 0, y: 0 };
+  const { surface, controller } = makeDesk(doc, world);
+  const r = controller.addComponentAt("resistor", "bb1", "e10"); // e10 ── e13
+
+  dragReleasingAt(partEl(surface, r.id), world, {
+    from: { x: 0, y: 0 },
+    stale: { x: 200, y: 200 }, // over bare desk: red, nothing in reach
+    at: { x: 2, y: 0 }, // a legal seat under the release — not consulted
+  });
+
+  assert.equal(doc.getComponent(r.id).anchor, "e10");
 });
 
 test("resistor end drag: the drop is the RINGED seat, not the release point", () => {
@@ -504,8 +538,8 @@ test("resistor body drag: a seat whose far lead is taken gives way to the neares
 
   dragReleasingAt(partEl(surface, r.id), world, {
     from: { x: 0, y: 0 },
-    stale: { x: 1, y: 0 },
-    at: { x: 2, y: 0 }, // e12 ── e15: refused
+    stale: { x: 2, y: 0 }, // e12 ── e15: refused
+    at: { x: 2, y: 0 },
   });
 
   // One pitch off, e11 and e13 tie; the tie goes left-to-right, and e11 ── e14

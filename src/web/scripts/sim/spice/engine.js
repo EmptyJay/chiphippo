@@ -433,7 +433,10 @@ const RETIRED = new Set(["ls-fanout", "marginal-high", "mixed-supply"]);
  * least one of them sinking, the rest unknown (X: sinking or let go, which
  * a LOW holds the net through either way) — and does the SOLVE agree, the
  * net under `vil`? Nothing else may reach it: no bench source, no diode
- * (a HIGH fed through one is a driver the outputs cannot see) and no channel
+ * feeding it (its CATHODE on the net: a HIGH fed through one is a driver the
+ * outputs cannot see — one leading OUT of it, its anode here, can only sink
+ * more of what the LOW already holds; but a ZENER's anode is a way in too,
+ * past its breakdown from a higher cathode) and no channel
  * that might be on (a joined group's fight is said on one member net only,
  * and the far side's drivers are not this net's).
  * @param {object|null} ctx - the latest settle's context
@@ -449,7 +452,10 @@ export function wiredLow(ctx, driven, net, solve = {}) {
   if (volts == null || !(volts <= vil)) return false;
   if (ctx.clocks?.some((c) => c.outNet === net)) return false;
   if (ctx.signals?.some((sig) => sig.net === net)) return false;
-  if (ctx.diodes?.some((d) => d.anode === net || d.cathode === net)) {
+  if (
+    ctx.diodes?.some((d) => d.cathode === net || (d.zener && d.anode === net))
+  ) {
+    // prettier-ignore
     return false;
   }
   let low = false;
@@ -2306,8 +2312,11 @@ export function tick({ spice = null, ...opts }) {
   };
   /** One digital tick at `at` on the current view, its state kept. */
   // The bench sources' levels the last settle (or rest) ran on — what a
-  // cycle's drive signature reads them from (`driveSig`).
-  let benchIn = null;
+  // cycle's drive signature reads them from (`driveSig`). Until this tick's
+  // first settle, the board stands on the inputs it was left on: `before`
+  // (null here once read the sources as unknown, and a replay walked before
+  // that first settle could never match its record).
+  let benchIn = before;
   const settleAt = (at) => {
     if (opts.stats) opts.stats.settles = (opts.stats.settles ?? 0) + 1;
     // The last settle's last pass is its own: folded before this one starts

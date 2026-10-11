@@ -1454,7 +1454,9 @@
     "downloadedVersion": "バージョン {version} をダウンロードしました。",
     "restart": "再起動",
     "upToDate": "最新です",
-    "checkFailed": "アップデートの確認に失敗しました"
+    "checkFailed": "アップデートの確認に失敗しました",
+    "installFailed": "アップデートはインストールされませんでした",
+    "installFailedMessage": "今はアップデートをインストールできなかったため、Chip Hippo はこのバージョンのまま開いています。もう一度試すには「再起動」を押してください。"
   },
   "bus": {
     "rename": "バスの名前を変更…",

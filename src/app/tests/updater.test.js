@@ -38,9 +38,11 @@ const autoUpdater = Object.assign(new EventEmitter(), {
     return new Promise((resolve) => this.checks.push(resolve));
   },
 });
+// Electron's own native autoUpdater — Squirrel, on macOS.
+const native = new EventEmitter();
 const realLoad = Module._load;
 Module._load = function load(request, ...rest) {
-  if (request === "electron") return { app };
+  if (request === "electron") return { app, autoUpdater: native };
   if (request === "electron-updater") return { autoUpdater };
   return realLoad.call(this, request, ...rest);
 };
@@ -96,6 +98,75 @@ test("an install that neither quits nor errors is given up on at its deadline", 
   app.emit("before-quit");
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(failed, 1);
+});
+
+/** A macOS attempt while Squirrel does (not) have the update yet. */
+const squirrel = (has) => {
+  autoUpdater.squirrelDownloadedUpdate = has;
+};
+test.afterEach(() => {
+  delete autoUpdater.squirrelDownloadedUpdate; // an updater without the flag
+});
+
+test("macOS: an attempt given up on before Squirrel has the update leaves nothing armed", async () => {
+  squirrel(false);
+  let failed = 0;
+  const installs = autoUpdater.installs;
+  const waiting = native.listenerCount("update-downloaded");
+  updater.quitAndInstall(() => failed++, { deadlineMs: 5, platform: "darwin" });
+  assert.equal(autoUpdater.installs, installs, "not asked before Squirrel is ready"); // prettier-ignore
+  assert.equal(native.listenerCount("update-downloaded"), waiting + 1);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(failed, 1, "given up on");
+  assert.equal(native.listenerCount("update-downloaded"), waiting, "its wait taken back"); // prettier-ignore
+  native.emit("update-downloaded"); // Squirrel, minutes later
+  assert.equal(autoUpdater.installs, installs, "and no restart nobody asked for"); // prettier-ignore
+});
+
+test("macOS: an attempt still waiting when Squirrel is ready installs then", () => {
+  squirrel(false);
+  let failed = 0;
+  const installs = autoUpdater.installs;
+  updater.quitAndInstall(() => failed++, { deadlineMs: 1000, platform: "darwin" }); // prettier-ignore
+  native.emit("update-downloaded");
+  assert.equal(autoUpdater.installs, installs + 1);
+  app.emit("before-quit");
+  assert.equal(failed, 0);
+});
+
+test("macOS: a check started during the wait for Squirrel fails the attempt, out loud", () => {
+  squirrel(false);
+  let failed = 0;
+  const installs = autoUpdater.installs;
+  const waiting = native.listenerCount("update-downloaded");
+  updater.quitAndInstall(() => failed++, { deadlineMs: 1000, platform: "darwin" }); // prettier-ignore
+  autoUpdater.emit("checking-for-update"); // Help ▸ Check for Updates, meanwhile
+  assert.equal(failed, 1, "the close guard's go is withdrawn");
+  assert.equal(native.listenerCount("update-downloaded"), waiting, "the wait taken back"); // prettier-ignore
+  native.emit("update-downloaded");
+  assert.equal(autoUpdater.installs, installs, "and nothing installs later");
+});
+
+test("macOS: with the update already Squirrel's, Restart installs at once", () => {
+  squirrel(true);
+  const installs = autoUpdater.installs;
+  const waiting = native.listenerCount("update-downloaded");
+  updater.quitAndInstall(() => {}, { platform: "darwin" });
+  assert.equal(autoUpdater.installs, installs + 1);
+  assert.equal(native.listenerCount("update-downloaded"), waiting, "no wait of ours"); // prettier-ignore
+  app.emit("before-quit");
+});
+
+test("an error from a check already running is not blamed on the install", async () => {
+  let failed = 0;
+  updater.checkForUpdates({ manual: false });
+  updater.quitAndInstall(() => failed++, { deadlineMs: 5, platform: "linux" });
+  autoUpdater.emit("error", new Error("offline"));
+  assert.equal(failed, 0, "the check's");
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(failed, 1, "the install still answers to its deadline");
+  autoUpdater.checks.splice(0).forEach((resolve) => resolve());
+  await new Promise((r) => setImmediate(r));
 });
 
 test("a manual check folded into a running startup one is answered as manual", async () => {

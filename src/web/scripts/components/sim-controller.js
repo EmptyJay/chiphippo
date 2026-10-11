@@ -233,14 +233,28 @@ const OP_STEP_BUDGET_MS = 500;
 /** The most edges Step Over runs at once, inside the same wall-clock budget,
     before it hands the rest of the call to the run (`stepOverCpu`). */
 const MAX_OVER_EDGES = 1_000_000;
+/** The most bytes of inline argument a Step Over's call is taken to return
+    past (`#cameBack`): a string or a parameter block, not a jump away. */
+const MAX_INLINE_BYTES = 256;
+
+/** How much SHALLOWER than the call found it a stack may be and still be
+    that call's return (a routine that also drops a byte or two of its
+    caller's): little, so a deep recursion — a 6502's stack is one page —
+    never wraps round to read as shallow. */
+const SHALLOW_SLACK = 16;
+
+/** Is the stack no deeper than the call found it? (A pointer that grows
+    down, compared within its width.) */
+function unwound(over, cpu, state) {
+  const deeper = (over.sp - cpu.spOf(state)) & over.mask;
+  return deeper === 0 || deeper > over.mask - SHALLOW_SLACK;
+}
 
 /** Has a Step Over's call returned? `state` begins an instruction at the
-    return address with the stack no deeper than the call found it (a
-    pointer that grows down, compared within its width). */
-function returned(over, cpu, state) {
-  if (cpu.pcOf(state) !== over.ret) return false;
-  const deeper = (over.sp - cpu.spOf(state)) & over.mask;
-  return deeper === 0 || deeper > over.mask >> 1;
+    return address with the stack no deeper than the call found it. (A call
+    that returns ELSEWHERE — past its inline arguments — is `#cameBack`.) */
+export function returned(over, cpu, state) {
+  return cpu.pcOf(state) === over.ret && unwound(over, cpu, state);
 }
 
 export class SimController {
@@ -329,10 +343,11 @@ export class SimController {
   // Stop and Run), and the hit the last tick made, handled once it is done.
   #cpuBreaks = new Map(); // compId → Set<number>
   #breakHit = null; // {compId, addr}
-  #opStep = null; // the CPU monitor's Step in progress: {compId, done, over}
+  #opStep = null; // the CPU monitor's Step in progress: {compId, done, over, idleFrom}
   // Step Over's call, when it outran the Step's budget and the RUN carries on
   // to its return: {compId, ret, sp, mask} — a breakpoint of one use.
   #overStop = null;
+  #pausing = false; // inside pause()'s catch-up batch
   #scope = globalThis.window; // what its events are heard and told on
   // How it paces its batches: the gap after a publish before the next, and
   // how long one may work (components/sim-pacer.js; the Worker's are its own).
@@ -594,7 +609,14 @@ export class SimController {
     // edge on. A batch out of budget drops its debt and re-anchors behind the
     // press: time stops there instead, never past an edge it did not run.
     const pressed = this.#simNow();
-    this.#runBatch({ flush: false });
+    this.#pausing = true;
+    try {
+      this.#runBatch({ flush: false });
+    } finally {
+      this.#pausing = false;
+    }
+    // A breakpoint reached on the way paused it there already (#breakAt).
+    if (this.#mode !== TRANSPORT.RUNNING) return;
     // A Step Over still running to its call's return ends where it is.
     this.#overStop = null;
     this.#mode = TRANSPORT.PAUSED;
@@ -1485,30 +1507,73 @@ export class SimController {
     return this.#cpuList.cpus;
   }
 
+  /**
+   * A Step Over's call has come back, if not to the instruction after it: a
+   * routine that reads its arguments from the bytes after the call (the
+   * 6502's `JSR PRIMM / .byte "text",0`, a Z80 `RST` that steps over its
+   * operand) returns PAST them, so `returned` alone would leave the run going
+   * until Pause. Such a routine pops its return address, so INSIDE it the
+   * stack stands where the call found it too — and a call it makes from
+   * there, or a conditional return it does not take, must not be mistaken
+   * for the way back. Back is, all of it:
+   *   · an instruction starting with the stack EXACTLY where the call found
+   *     it, a little past the return address (MAX_INLINE_BYTES);
+   *   · straight after a subroutine return (RTS, RET, RET cc — never an
+   *     interrupt's) that was TAKEN — it did not just fall through to here;
+   *   · and not the return OF a call: the instruction before here is no call
+   *     that ends here (the nested call's return lands right after it).
+   * The cheap tests first, so an ordinary instruction costs no memory read.
+   * A routine that leaves some other way (a jump through its pointer) is
+   * not seen — the run goes on until Pause, which is safe; a stop inside the
+   * routine would not be.
+   */
+  #cameBack(over, id, cpu, state, track, result, netlist) {
+    if (!cpu.isReturn) return false;
+    const pc = cpu.pcOf(state);
+    const past = (pc - over.ret) & 0xffff;
+    if (past === 0 || past > MAX_INLINE_BYTES) return false;
+    if (((over.sp - cpu.spOf(state)) & over.mask) !== 0) return false;
+    const prev = track.history.at(-2);
+    if (prev?.kind !== "instr") return false;
+    const env = this.#cpuEnv(id, result, netlist);
+    if (!env) return false;
+    const read = this.#cpuMap.reader(env);
+    const line = cpu.disassemble(read, prev.pc);
+    if (!cpu.isReturn(line)) return false;
+    if (pc === ((prev.pc + line.length) & 0xffff)) return false; // not taken
+    for (let n = 1; n <= 4; n++) {
+      const before = cpu.disassemble(read, (pc - n) & 0xffff);
+      if (before.length === n && cpu.isCall(before)) return false;
+    }
+    return true;
+  }
+
   /** One tick, into every CPU's record — and a breakpoint, if one was hit. */
-  #observeCpus(doc, result) {
+  #observeCpus(doc, result, netlist) {
     for (const { id, cpu } of this.#cpusOn(doc)) {
       let track = this.#cpuTracks.get(id);
       if (!track) this.#cpuTracks.set(id, (track = newTrack()));
       const state = result.state.get(id);
       const started = observeTick(track, cpu, state, result.pinLevels.get(id));
-      if (!started) continue;
       const step = this.#opStep;
       if (
         step?.compId === id &&
-        (!step.over || (started === "instr" && returned(step.over, cpu, state)))
+        step.idleFrom != null &&
+        track.cycles > step.idleFrom
       ) {
-        // prettier-ignore
+        step.done = true; // a waiting CPU's Step: one bus cycle
+      }
+      if (!started) continue;
+      const back = (o) =>
+        started === "instr" &&
+        (returned(o, cpu, state) ||
+          this.#cameBack(o, id, cpu, state, track, result, netlist));
+      if (step?.compId === id && (!step.over || back(step.over))) {
         step.done = true;
       }
       const addr = cpu.pcOf(state);
       const over = this.#overStop;
-      if (
-        started === "instr" &&
-        over?.compId === id &&
-        returned(over, cpu, state)
-      ) {
-        // prettier-ignore
+      if (over?.compId === id && back(over)) {
         this.#overStop = null;
         this.#breakHit ??= { compId: id, addr, over: true };
       }
@@ -1546,10 +1611,17 @@ export class SimController {
    */
   stepCpu(compId) {
     if (this.#mode !== TRANSPORT.PAUSED || this.#stalled) return false;
-    if (!this.#cpusOn(this.#document()).some((c) => c.id === compId)) {
-      return false;
-    }
-    return this.#runCpuStep({ compId, done: false, over: null }, MAX_OP_EDGES);
+    const entry = this.#cpusOn(this.#document()).find((c) => c.id === compId);
+    if (!entry) return false;
+    // A CPU waiting for an interrupt (HALT, WAI, STP) starts nothing until
+    // one comes — and the Step's whole budget, the board run on thousands of
+    // clocks, was what a press cost. There a Step is ONE bus cycle (`idleFrom`:
+    // the cycle count it began at), or less if an interrupt starts something.
+    const state = this.#lastShown?.result.state.get(compId);
+    const track = this.#cpuTracks.get(compId);
+    const idleFrom =
+      state && track && entry.cpu.waiting?.(state) ? track.cycles : null;
+    return this.#runCpuStep({ compId, done: false, over: null, idleFrom }, MAX_OP_EDGES); // prettier-ignore
   }
 
   /**
@@ -1639,8 +1711,12 @@ export class SimController {
       if (!this.#flushPublish()) this.#republish();
       this.#onTransportChange?.(this.#mode);
     }
+    // `paused` says the BREAK paused the run (the monitor raises its window
+    // on that) — not a Pause pressed, whose catch-up merely reached one.
     this.#scope.dispatchEvent(
-      new CustomEvent("chiphippo:cpu-break", { detail: { ...hit, paused } }),
+      new CustomEvent("chiphippo:cpu-break", {
+        detail: { ...hit, paused: paused && !this.#pausing },
+      }),
     );
   }
 
@@ -1935,7 +2011,7 @@ export class SimController {
       this.#warm = result.netLevels;
       this.#state = result.state;
       this.#prevPins = result.pinLevels;
-      this.#observeCpus(doc, result);
+      this.#observeCpus(doc, result, netlist);
       this.#wakeAt = result.wakeAt ?? null;
       if (this.#batchDepth === 0) this.#arm();
       // Volatile (SRAM) writes land in the run image + drive the live inspector;

@@ -91,6 +91,17 @@ Code: `app/store/project-store.js` + `project-images.js` + `project-migrate.js` 
 `project:boot`/`:new`/`:open`/`:open-recent`/`:save`/`:choose-path`/`:regrant`, plus
 `desktop:export`/`:import`/`:duplicate`.
 
+- **A desk swap is one thing at a time, and waits for its Stop** (2026-10-11).
+  `#leaveActiveDesk` = `#stopForSwap` (dispatches `chiphippo:desk-leaving` with
+  `{project, hold}`, Stops, awaits what was `hold()`-ed — the CPU monitor's kept ROM edits
+  landing in the desk being left — at most `HOLD_MS`, 10 s) → THEN `#stash()` → close the
+  aux windows. Every swap (add/select/duplicate/import/delete a desktop, an example, a
+  project swap) runs through `#oneSwapAtATime`; a second click during a hold queues, so
+  the write lands in its own desktop and the last click wins. Never call a public swap
+  from inside one (deadlock): `#addExample` calls `#selectTab`. `#confirmLeaveProject`
+  awaits the queue first, so a quit's question and save see the kept edits. A write
+  coming back after its desk has gone flags nothing (`keepRunEdits`' `stillHere`). A
+  PROJECT swap (`project: true`) keeps no edits — that project was saved or discarded.
 - **A tab is a DOCUMENT, not a second desk.** There is exactly one `DeskView` /
   `DeskController` / `SimController` / palette / guide / analyzer; switching desktops
   SWAPS THE DOCUMENT in place through `DeskController.loadDocument` — the same

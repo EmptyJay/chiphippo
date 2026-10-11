@@ -289,7 +289,7 @@ function fixedFacts(doc, netlist) {
 
   // Diodes: one-way couplers. A pair whose leads land in ONE net (a shorted
   // diode) or on nothing conducts nothing — the part stays, inert.
-  const diodes = []; // { id, anode, cathode }
+  const diodes = []; // { id, anode, cathode, zener }
   for (const comp of components) {
     const def = partDef(comp.ref);
     if (typeof def?.oneWayBridges !== "function" || comp.board == null) {
@@ -302,7 +302,9 @@ function fixedFacts(doc, netlist) {
       const anode = addressOfPin.get(a) ? netOf(addressOfPin.get(a)) : null;
       const cathode = addressOfPin.get(k) ? netOf(addressOfPin.get(k)) : null;
       if (!anode || !cathode || anode === cathode) continue;
-      diodes.push({ id: comp.id, anode, cathode });
+      // (`zener`: it can also conduct cathode → anode, past its breakdown —
+      // what Spice Lite's solve gives it and `wiredLow` has to know.)
+      diodes.push({ id: comp.id, anode, cathode, zener: def.diode?.zener === true }); // prettier-ignore
     }
   }
 
