@@ -1301,6 +1301,7 @@
     "failStart": "No se pudo iniciar el proyecto",
     "failOpen": "No se pudo abrir el proyecto",
     "failSave": "No se pudo guardar el proyecto",
+    "slotHeld": "No se pudo leer el proyecto sin guardar de la última sesión, así que se conserva donde se guardaría este. Usa Guardar como para darle a este proyecto un archivo propio.",
     "failClose": "No se pudieron comprobar los cambios sin guardar: guarda tu trabajo antes de salir",
     "failLocation": "No se pudo elegir una ubicación",
     "failDuplicate": "No se pudo duplicar el escritorio",
@@ -1486,7 +1487,9 @@
     "upToDate": "Al día",
     "checkFailed": "Falló la búsqueda de actualizaciones",
     "installFailed": "Actualización no instalada",
-    "installFailedMessage": "No se ha podido instalar la actualización ahora, así que Chip Hippo sigue abierto en esta versión. Pulsa Reiniciar para volver a intentarlo."
+    "installFailedMessage": "No se ha podido instalar la actualización ahora, así que Chip Hippo sigue abierto en esta versión. Pulsa Reiniciar para volver a intentarlo.",
+    "preparing": "Preparando la actualización",
+    "preparingMessage": "Chip Hippo se reiniciará con la nueva versión en cuanto esté lista; antes preguntará por el trabajo sin guardar. Mientras tanto, puedes seguir trabajando."
   },
   "bus": {
     "rename": "Renombrar el bus…",

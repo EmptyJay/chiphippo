@@ -1300,6 +1300,7 @@
     "failStart": "Could not start the project",
     "failOpen": "Could not open the project",
     "failSave": "Could not save the project",
+    "slotHeld": "Last session's unsaved project could not be read, so it is kept where this one would be saved. Use Save As to give this project a file of its own.",
     "failClose": "Could not check for unsaved changes — save your work before quitting",
     "failLocation": "Could not choose a location",
     "failDuplicate": "Could not duplicate the desktop",
@@ -1483,7 +1484,9 @@
     "upToDate": "Up to date",
     "checkFailed": "Update check failed",
     "installFailed": "Update not installed",
-    "installFailedMessage": "The update could not be installed just now, so Chip Hippo is still open on this version. Press Restart to try again."
+    "installFailedMessage": "The update could not be installed just now, so Chip Hippo is still open on this version. Press Restart to try again.",
+    "preparing": "Preparing the update",
+    "preparingMessage": "Chip Hippo restarts into the new version as soon as it is ready — it asks about unsaved work first. Keep working meanwhile."
   },
   "bus": {
     "rename": "Rename bus…",

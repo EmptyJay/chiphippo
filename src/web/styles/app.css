@@ -370,6 +370,13 @@
   scrollbar-width: thin;
 }
 
+/* A desk switch waiting on its Stop (kept ROM edits being written): what is
+   clicked meanwhile waits its turn. */
+.project-tabs--busy,
+.project-tabs--busy * {
+  cursor: progress;
+}
+
 .project-tab,
 .project-tab-add {
   display: flex;

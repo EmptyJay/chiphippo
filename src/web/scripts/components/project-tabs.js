@@ -132,6 +132,13 @@ export class ProjectTabs {
     this.#render();
   }
 
+  /** Show that a desk switch is waiting (on the Stop's kept edits being
+      written): what is clicked now waits its turn, so say so. */
+  setBusy(busy) {
+    this.#root.classList.toggle("project-tabs--busy", busy === true);
+    this.#root.setAttribute("aria-busy", busy === true ? "true" : "false");
+  }
+
   /** Freeze the destructive affordances while the circuit runs. */
   setEditingLocked(locked) {
     this.#locked = locked === true;

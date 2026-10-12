@@ -210,7 +210,7 @@
           },
           {
             "id": "w10",
-            "from": "bb2.f38",
+            "from": "bb2.j38",
             "to": "bb1.+30",
             "color": "red"
           },
@@ -222,13 +222,13 @@
           },
           {
             "id": "w12",
-            "from": "bb2.f43",
+            "from": "bb2.j43",
             "to": "bb1.-35",
             "color": "black"
           },
           {
             "id": "w13",
-            "from": "bb2.f45",
+            "from": "bb2.j45",
             "to": "bb1.-36",
             "color": "black"
           },
@@ -240,7 +240,7 @@
           },
           {
             "id": "w15",
-            "from": "bb2.f54",
+            "from": "bb2.j54",
             "to": "bb1.-44",
             "color": "black"
           },
@@ -296,7 +296,7 @@
             "kind": "label",
             "x": 0,
             "y": -7.3999999999999995,
-            "text": "each step by over 40 % and rings at ~49 Hz — a 20.4 ms period — dying away",
+            "text": "each step by over 40 % and rings at ~49 Hz — a 20.5 ms period — dying away",
             "color": "#808080"
           },
           {

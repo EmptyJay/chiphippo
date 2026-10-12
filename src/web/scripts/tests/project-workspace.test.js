@@ -157,6 +157,7 @@ function fakeBridge() {
     // recovery copy stashed beside a saved one.
     save: async (meta, filePath) => {
       if (control.failWrites) throw new Error("no file to write to");
+      if (control.slotHeld && !filePath) return { ok: false, code: "slot-held" }; // prettier-ignore
       counts.saves += 1; // counted where it STARTED, before any gate
       if (holdSave) await holdSave;
       const target = filePath ?? DEFAULT_PROJECT;
@@ -335,8 +336,10 @@ async function harness({
   const win = resetDom();
   const sim = {
     stops: 0,
+    running: false,
     stop() {
       this.stops += 1;
+      this.running = false;
     },
   };
   // A stand-in for the controller's one seam: it does what the real
@@ -807,6 +810,65 @@ test("a quit while a switch is held waits for it: the question is about the proj
   }
 });
 
+test("a Run started during a switch's wait is stopped too: no run carries on under the next desk", async () => {
+  const h = await harness();
+  await twoDesktops(h); // on t1
+  let first = true;
+  const onLeave = (e) => {
+    if (!first) return;
+    first = false;
+    // Space during the wait: a run starts on the desk being left.
+    e.detail.hold(settle().then(() => (h.sim.running = true)));
+  };
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    await h.workspace.selectTab("t2");
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+  assert.equal(h.workspace.activeTab.id, "t2");
+  assert.equal(h.sim.running, false);
+  assert.equal(h.sim.stops, 2, "the swap's Stop, and the restarted run's");
+});
+
+test("tab clicks queued behind a held switch are one switch, to the last one, and the strip shows it is busy", async () => {
+  const h = await harness();
+  await h.workspace.addTab(); // t2
+  await h.workspace.addTab(); // t3
+  await h.workspace.selectTab("t1");
+  let release;
+  const gate = new Promise((r) => (release = r));
+  let first = true;
+  const onLeave = (e) => {
+    if (!first) return;
+    first = false;
+    e.detail.hold(gate);
+  };
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  const strip = h.tabs.element;
+  try {
+    const adding = h.workspace.addTab(); // t4, held
+    await settle();
+    assert.ok(
+      strip.classList.contains("project-tabs--busy"),
+      "busy while held",
+    );
+    const loads = h.controller.loads.length;
+    const clicks = ["t2", "t3", "t1"].map((id) => h.workspace.selectTab(id));
+    release();
+    await Promise.all([adding, ...clicks]);
+    assert.equal(h.workspace.activeTab.id, "t1", "the last click");
+    assert.equal(
+      h.controller.loads.length - loads,
+      2,
+      "t4's load, then ONE switch",
+    );
+    assert.ok(!strip.classList.contains("project-tabs--busy"));
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+});
+
 test("a hold that never answers does not hold the switch forever", async () => {
   const h = await harness({ holdMs: 20 });
   await twoDesktops(h); // on t1
@@ -922,6 +984,17 @@ test("a failed write is reported and never claims to have saved", async () => {
   await settle();
   assert.match(dialogTitle(), /Could not save the project/);
   assert.equal(h.workspace.dirty, true);
+});
+
+test("a save into a HELD working slot says why, in words, and points at Save As", async () => {
+  const h = await harness();
+  h.doc.load(someDesign());
+  h.control.slotHeld = true; // an unread recovery sits in the slot (boot-slot.js)
+  assert.equal(await h.workspace.save(), false);
+  await settle();
+  assert.match(dialogTitle(), /Could not save the project/);
+  assert.match(document.querySelector(".popup-message")?.textContent ?? "", /Use Save As/); // prettier-ignore
+  assert.equal(h.workspace.dirty, true, "not claimed as saved");
 });
 
 // ── An edit landing while a write is in flight ───────────────────────────────
@@ -1282,6 +1355,27 @@ test("a memory write is stashed even when the document is unchanged", async () =
   assert.equal(await h.workspace.autoSaveNow(), true, "the bytes must travel");
   await settle();
   assert.equal(await h.workspace.autoSaveNow(), false, "and only once");
+});
+
+test("ROM bytes changed with the document unchanged are unsaved work: the • shows, a quit asks, a save clears it", async () => {
+  const h = await harness();
+  await homed(h);
+  assert.equal(h.workspace.dirty, false);
+  const told = h.announced.count;
+  // A second keep of run edits (or an inspector re-save) into a chip already
+  // flagged programmed and edited: the params come out the same.
+  h.workspace.markImagesChanged();
+  assert.equal(h.workspace.dirty, true, "the file still holds the old bytes");
+  assert.ok(h.announced.count > told, "the title is told");
+  await h.workspace.autoSaveNow(); // a recovery stash is not the file
+  assert.equal(h.workspace.dirty, true);
+  const closing = h.workspace.confirmClose();
+  await settle();
+  assert.ok(findButton("Discard"), "a quit asks");
+  clickButton("Cancel");
+  assert.equal(await closing, false);
+  assert.equal(await h.workspace.save(), true);
+  assert.equal(h.workspace.dirty, false, "saved: the file carries them");
 });
 
 test("the interval arms itself and keeps stashing", async () => {

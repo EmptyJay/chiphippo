@@ -1301,6 +1301,7 @@
     "failStart": "Non è stato possibile avviare il progetto",
     "failOpen": "Non è stato possibile aprire il progetto",
     "failSave": "Non è stato possibile salvare il progetto",
+    "slotHeld": "Non è stato possibile leggere il progetto non salvato dell'ultima sessione, quindi viene conservato dove verrebbe salvato questo. Usa Salva con nome per dare a questo progetto un file tutto suo.",
     "failClose": "Non è stato possibile verificare le modifiche non salvate: salva il lavoro prima di uscire",
     "failLocation": "Non è stato possibile scegliere una posizione",
     "failDuplicate": "Non è stato possibile duplicare la scrivania",
@@ -1486,7 +1487,9 @@
     "upToDate": "Aggiornato",
     "checkFailed": "Ricerca di aggiornamenti fallita",
     "installFailed": "Aggiornamento non installato",
-    "installFailedMessage": "Non è stato possibile installare l'aggiornamento ora, quindi Chip Hippo resta aperto in questa versione. Premi Riavvia per riprovare."
+    "installFailedMessage": "Non è stato possibile installare l'aggiornamento ora, quindi Chip Hippo resta aperto in questa versione. Premi Riavvia per riprovare.",
+    "preparing": "Preparazione dell'aggiornamento",
+    "preparingMessage": "Chip Hippo si riavvierà con la nuova versione appena sarà pronta, chiedendo prima del lavoro non salvato. Nel frattempo puoi continuare a lavorare."
   },
   "bus": {
     "rename": "Rinomina il bus…",

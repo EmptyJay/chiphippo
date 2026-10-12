@@ -1511,63 +1511,64 @@ export class SimController {
    * A Step Over's call has come back, if not to the instruction after it: a
    * routine that reads its arguments from the bytes after the call (the
    * 6502's `JSR PRIMM / .byte "text",0`, a Z80 `RST` that steps over its
-   * operand) returns PAST them, so `returned` alone would leave the run going
-   * until Pause. Such a routine pops its return address, so INSIDE it the
-   * stack stands where the call found it too — and a call it makes from
-   * there, or a conditional return it does not take, must not be mistaken
-   * for the way back. Back is, all of it:
-   *   · an instruction starting with the stack EXACTLY where the call found
-   *     it, a little past the return address (MAX_INLINE_BYTES);
-   *   · straight after a subroutine return (RTS, RET, RET cc — never an
-   *     interrupt's) that was TAKEN — it did not just fall through to here;
-   *   · and not the return OF a call: the instruction before here is no call
-   *     that ends here (the nested call's return lands right after it).
-   * The cheap tests first, so an ordinary instruction costs no memory read.
-   * A routine that leaves some other way (a jump through its pointer) is
-   * not seen — the run goes on until Pause, which is safe; a stop inside the
-   * routine would not be.
+   * operand) comes back PAST them, so `returned` alone would leave the run
+   * going until Pause. Back is an instruction starting
+   *   · a little past the return address (within MAX_INLINE_BYTES),
+   *   · with the stack EXACTLY where the call found it,
+   *   · and NOTHING run between the return address and here since the Step
+   *     Over began (`over.ran`, the nearest instruction start in that window
+   *     — `#noteRan`): what lies there is the arguments, never executed.
+   * Such a routine pops its return address, so inside it the stack stands at
+   * the call's level too — but a stop there would be somewhere code HAS run
+   * since: a routine near the call site has run its own instructions, a
+   * nested call ran its CALL, an untaken RET cc ran itself; one far away is
+   * out of the window. What the bytes before here LOOK like no longer
+   * matters (an argument ending in an RST opcode, a string with a space —
+   * JSR — two from its end, both read as "a call returning here" once), nor
+   * how it got here (a RET, an interrupt's return after it, a computed jump
+   * past the arguments). No memory is read: the test is three numbers.
    */
-  #cameBack(over, id, cpu, state, track, result, netlist) {
-    if (!cpu.isReturn) return false;
-    const pc = cpu.pcOf(state);
-    const past = (pc - over.ret) & 0xffff;
+  #cameBack(over, cpu, state) {
+    const past = (cpu.pcOf(state) - over.ret) & 0xffff;
     if (past === 0 || past > MAX_INLINE_BYTES) return false;
     if (((over.sp - cpu.spOf(state)) & over.mask) !== 0) return false;
-    const prev = track.history.at(-2);
-    if (prev?.kind !== "instr") return false;
-    const env = this.#cpuEnv(id, result, netlist);
-    if (!env) return false;
-    const read = this.#cpuMap.reader(env);
-    const line = cpu.disassemble(read, prev.pc);
-    if (!cpu.isReturn(line)) return false;
-    if (pc === ((prev.pc + line.length) & 0xffff)) return false; // not taken
-    for (let n = 1; n <= 4; n++) {
-      const before = cpu.disassemble(read, (pc - n) & 0xffff);
-      if (before.length === n && cpu.isCall(before)) return false;
+    return over.ran == null || over.ran >= past;
+  }
+
+  /** An instruction began at `pc` while Step Over `over` ran: kept as the
+      nearest start at or past its return address, within the window. */
+  #noteRan(over, pc) {
+    const at = (pc - over.ret) & 0xffff;
+    if (at <= MAX_INLINE_BYTES && (over.ran == null || at < over.ran)) {
+      over.ran = at;
     }
-    return true;
   }
 
   /** One tick, into every CPU's record — and a breakpoint, if one was hit. */
-  #observeCpus(doc, result, netlist) {
+  #observeCpus(doc, result) {
     for (const { id, cpu } of this.#cpusOn(doc)) {
       let track = this.#cpuTracks.get(id);
       if (!track) this.#cpuTracks.set(id, (track = newTrack()));
       const state = result.state.get(id);
       const started = observeTick(track, cpu, state, result.pinLevels.get(id));
       const step = this.#opStep;
-      if (
-        step?.compId === id &&
-        step.idleFrom != null &&
-        track.cycles > step.idleFrom
-      ) {
-        step.done = true; // a waiting CPU's Step: one bus cycle
+      if (step?.compId === id && !step.over) {
+        // A waiting CPU's Step: one bus cycle. And a Step that STARTS one
+        // waiting — the HALT or WAI it began on has run, and nothing starts
+        // after it until an interrupt — ends there, the CPU shown waiting.
+        if (
+          step.idleFrom != null
+            ? track.cycles > step.idleFrom
+            : cpu.waiting?.(state)
+        ) {
+          // prettier-ignore
+          step.done = true;
+        }
       }
       if (!started) continue;
       const back = (o) =>
         started === "instr" &&
-        (returned(o, cpu, state) ||
-          this.#cameBack(o, id, cpu, state, track, result, netlist));
+        (returned(o, cpu, state) || this.#cameBack(o, cpu, state));
       if (step?.compId === id && (!step.over || back(step.over))) {
         step.done = true;
       }
@@ -1576,6 +1577,12 @@ export class SimController {
       if (over?.compId === id && back(over)) {
         this.#overStop = null;
         this.#breakHit ??= { compId: id, addr, over: true };
+      }
+      // What ran, for `#cameBack` — noted AFTER it asked about this start.
+      if (started === "instr") {
+        const running = step?.compId === id ? step.over : null;
+        if (running) this.#noteRan(running, addr);
+        if (over?.compId === id && over !== running) this.#noteRan(over, addr);
       }
       if (started !== "instr" || this.#breakHit) continue;
       if (this.#cpuBreaks.get(id)?.has(addr)) this.#breakHit = { compId: id, addr }; // prettier-ignore
@@ -1651,6 +1658,7 @@ export class SimController {
       ret: (pc + line.length) & 0xffff,
       sp: env.cpu.spOf(state),
       mask: env.cpu.spMask,
+      ran: null, // see #cameBack
     };
     if (this.#runCpuStep({ compId, done: false, over }, MAX_OVER_EDGES)) {
       return "done";
@@ -2011,7 +2019,7 @@ export class SimController {
       this.#warm = result.netLevels;
       this.#state = result.state;
       this.#prevPins = result.pinLevels;
-      this.#observeCpus(doc, result, netlist);
+      this.#observeCpus(doc, result);
       this.#wakeAt = result.wakeAt ?? null;
       if (this.#batchDepth === 0) this.#arm();
       // Volatile (SRAM) writes land in the run image + drive the live inspector;

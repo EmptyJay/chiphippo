@@ -38,9 +38,7 @@
 //     status, as the monitor prints them, and the memory access in flight;
 //   · `disassemble(read, addr)` — its instruction set's disassembler, and
 //     `isCall(line)` — whether a decoded line calls a subroutine (what the
-//     monitor's Step Over is offered for), and `isReturn(line)` — whether it
-//     is a SUBROUTINE's return (never an interrupt's: how Step Over sees a
-//     call that returned past its inline arguments);
+//     monitor's Step Over is offered for);
 //   · `spOf(state)` + `spMask` — the stack pointer as the operation in flight
 //     began, and its width: Step Over's test for a call that has RETURNED
 //     (back at the return address, the stack no deeper than it was);
@@ -133,7 +131,6 @@ export function w65c02Monitor(pins) {
     },
 
     isCall: (line) => line?.bytes?.[0] === 0x20, // JSR
-    isReturn: (line) => line?.bytes?.[0] === 0x60, // RTS
 
     // Waiting for an interrupt (WAI) or stopped for good (STP): no
     // instruction starts until it is over.
@@ -292,10 +289,6 @@ export function z80Monitor(pins) {
 
     // Past any DD/FD prefix: the core runs `DD CD nn nn` as the CALL it is.
     isCall: (line) => isZ80Call(z80Opcode(line)),
-    isReturn(line) {
-      const op = z80Opcode(line);
-      return op === 0xc9 || (op & 0xc7) === 0xc0; // RET, RET cc
-    },
 
     // Halted: the NOP it fetches over and over starts nothing.
     waiting: (s) => s.halted === true && s.cur === "instr",

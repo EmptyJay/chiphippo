@@ -1300,6 +1300,7 @@
     "failStart": "Das Projekt konnte nicht gestartet werden",
     "failOpen": "Das Projekt konnte nicht geöffnet werden",
     "failSave": "Das Projekt konnte nicht gespeichert werden",
+    "slotHeld": "Das ungesicherte Projekt der letzten Sitzung konnte nicht gelesen werden und bleibt deshalb dort, wo dieses gespeichert würde. Gib diesem Projekt mit „Speichern unter“ eine eigene Datei.",
     "failClose": "Ungespeicherte Änderungen konnten nicht geprüft werden — speichern Sie Ihre Arbeit vor dem Beenden",
     "failLocation": "Es konnte kein Ort gewählt werden",
     "failDuplicate": "Das Arbeitsblatt konnte nicht dupliziert werden",
@@ -1483,7 +1484,9 @@
     "upToDate": "Aktuell",
     "checkFailed": "Updatesuche fehlgeschlagen",
     "installFailed": "Update nicht installiert",
-    "installFailedMessage": "Das Update konnte gerade nicht installiert werden, daher ist Chip Hippo weiterhin in dieser Version geöffnet. Klicke auf Neu starten, um es erneut zu versuchen."
+    "installFailedMessage": "Das Update konnte gerade nicht installiert werden, daher ist Chip Hippo weiterhin in dieser Version geöffnet. Klicke auf Neu starten, um es erneut zu versuchen.",
+    "preparing": "Update wird vorbereitet",
+    "preparingMessage": "Chip Hippo startet mit der neuen Version neu, sobald sie bereit ist – vorher wird nach ungesicherten Änderungen gefragt. Du kannst so lange weiterarbeiten."
   },
   "bus": {
     "rename": "Bus umbenennen…",

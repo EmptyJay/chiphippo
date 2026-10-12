@@ -1301,6 +1301,7 @@
     "failStart": "Le projet n'a pas pu être démarré",
     "failOpen": "Le projet n'a pas pu être ouvert",
     "failSave": "Le projet n'a pas pu être enregistré",
+    "slotHeld": "Le projet non enregistré de la dernière session n'a pas pu être lu ; il est donc conservé là où celui-ci serait enregistré. Utilisez Enregistrer sous pour donner à ce projet son propre fichier.",
     "failClose": "Impossible de vérifier les modifications non enregistrées — enregistrez votre travail avant de quitter",
     "failLocation": "Aucun emplacement n'a pu être choisi",
     "failDuplicate": "Le bureau n'a pas pu être dupliqué",
@@ -1486,7 +1487,9 @@
     "upToDate": "À jour",
     "checkFailed": "Échec de la recherche de mises à jour",
     "installFailed": "Mise à jour non installée",
-    "installFailedMessage": "La mise à jour n'a pas pu être installée pour l'instant, Chip Hippo reste donc ouvert dans cette version. Cliquez sur Redémarrer pour réessayer."
+    "installFailedMessage": "La mise à jour n'a pas pu être installée pour l'instant, Chip Hippo reste donc ouvert dans cette version. Cliquez sur Redémarrer pour réessayer.",
+    "preparing": "Préparation de la mise à jour",
+    "preparingMessage": "Chip Hippo redémarrera dans la nouvelle version dès qu'elle sera prête, après vous avoir interrogé sur le travail non enregistré. Vous pouvez continuer à travailler en attendant."
   },
   "bus": {
     "rename": "Renommer le bus…",

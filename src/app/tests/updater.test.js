@@ -157,6 +157,35 @@ test("macOS: with the update already Squirrel's, Restart installs at once", () =
   app.emit("before-quit");
 });
 
+test("Restart waits for Squirrel BEFORE anything is asked: ready at once off macOS or once it has the update", async () => {
+  let waited = 0;
+  const onWait = () => waited++;
+  assert.equal(await updater.readyToInstall({ platform: "linux", onWait }), true); // prettier-ignore
+  squirrel(true);
+  assert.equal(await updater.readyToInstall({ platform: "darwin", onWait }), true); // prettier-ignore
+  assert.equal(waited, 0, "nothing to wait for");
+  squirrel(false);
+  const listening = native.listenerCount("update-downloaded");
+  const first = updater.readyToInstall({ platform: "darwin", onWait });
+  const second = updater.readyToInstall({ platform: "darwin", onWait }); // a second Restart
+  assert.equal(native.listenerCount("update-downloaded"), listening + 1, "one wait, joined"); // prettier-ignore
+  assert.equal(waited, 2, "each press is told why nothing happens yet");
+  native.emit("update-downloaded");
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.equal(native.listenerCount("update-downloaded"), listening, "taken back"); // prettier-ignore
+});
+
+test("a wait for Squirrel that runs out, or a quit meanwhile, is a no — and leaves nothing armed", async () => {
+  squirrel(false);
+  const listening = native.listenerCount("update-downloaded");
+  assert.equal(await updater.readyToInstall({ platform: "darwin", waitMs: 5 }), false); // prettier-ignore
+  assert.equal(native.listenerCount("update-downloaded"), listening);
+  const quitting = updater.readyToInstall({ platform: "darwin", waitMs: 1000 });
+  app.emit("before-quit");
+  assert.equal(await quitting, false);
+  assert.equal(native.listenerCount("update-downloaded"), listening);
+});
+
 test("an error from a check already running is not blamed on the install", async () => {
   let failed = 0;
   updater.checkForUpdates({ manual: false });

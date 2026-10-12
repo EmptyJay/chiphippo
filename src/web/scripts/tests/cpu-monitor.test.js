@@ -557,6 +557,22 @@ test("SimController: a Step on a halted CPU is one bus cycle, not the Step's who
   sim.stop();
 });
 
+test("SimController: a Step pressed ON a HALT runs it, and stops there halted", async () => {
+  const { sim, states } = await z80Controller({ hz: 1 });
+  sim.pause();
+  sim.monitorCpu("c1");
+  sim.pokeCpuMemory("c1", 0x0001, 0x76); // NOP ; HALT
+  for (let i = 0; i < 80 && states.at(-1).cpuMonitor?.pipeline.current.addr !== 0x0001; i++) sim.step(); // prettier-ignore
+  const before = states.at(-1).cpuMonitor;
+  assert.equal(before.pipeline.current.text, "HALT");
+  assert.notEqual(before.view.status, "halt", "not halted yet");
+  assert.equal(sim.stepCpu("c1"), true, "done — not the whole budget");
+  const after = states.at(-1).cpuMonitor;
+  assert.equal(after.view.status, "halt");
+  assert.ok(after.cycles - before.cycles <= 8, `${after.cycles - before.cycles} T-states`); // prettier-ignore
+  sim.stop();
+});
+
 test("SimController: a breakpoint the monitor's Step lands on is reported", async () => {
   const { sim, states, breaks } = await z80Controller({ hz: 1 });
   sim.pause();
@@ -803,6 +819,31 @@ test("SimController: Step Over is not fooled inside a routine that popped its re
     assert.equal(sim.stepOverCpu("c1"), "done", what);
     const s = states.at(-1).cpuMonitor;
     assert.equal(s.pc, 0x0008, `${what}: back past the argument, not inside the routine`); // prettier-ignore
+    assert.equal(reg(s, "SP"), 0xffff, what);
+    sim.stop();
+  }
+});
+
+test("SimController: Step Over judges where code RAN, not what the bytes before the return look like", async () => {
+  for (const [what, routine] of [
+    // The inline argument is $FF — an RST 38h opcode, read once as "a call
+    // returning here". EX (SP),HL · INC HL · EX (SP),HL · RET.
+    ["an argument that looks like an RST", [0xe3, 0x23, 0xe3, 0xc9]],
+    // A manual call: push a return ($0027, inside the routine) and jump to a
+    // RET at $0030 — back at the call's stack level, but inside the routine.
+    // POP HL · LD DE,$0027 · PUSH DE · JR $0030 · INC HL · PUSH HL · RET
+    ["a pushed return and a jump", [0xe1, 0x11, 0x27, 0x00, 0xd5, 0x18, 0x09, 0x23, 0xe5, 0xc9]], // prettier-ignore
+  ]) {
+    const { sim, states } = await atCall({
+      program: [
+        [0x0004, [0xcd, 0x20, 0x00, 0xff, 0x00]], // CALL $0020 · DB $FF · NOP
+        [0x0020, routine],
+        [0x0030, [0xc9]],
+      ],
+    });
+    assert.equal(sim.stepOverCpu("c1"), "done", what);
+    const s = states.at(-1).cpuMonitor;
+    assert.equal(s.pc, 0x0008, `${what}: past the argument, at the NOP`);
     assert.equal(reg(s, "SP"), 0xffff, what);
     sim.stop();
   }

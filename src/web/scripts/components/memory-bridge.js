@@ -198,6 +198,7 @@ export class MemoryBridge {
    *   if not, nothing on the desk there now is flagged (and it is not kept)
    */
   async keepRunEdits(compId, bytes, { stillHere = () => true } = {}) {
+    // (Always a `stillHere`: a keep is the one write that can outlive its desk.)
     const kept = await this.#save(compId, bytes, { stillHere });
     if (kept && this.#windows.has(compId)) this.#sendContext(compId);
     return kept;
@@ -205,7 +206,7 @@ export class MemoryBridge {
 
   /** Persist inspector hand-edits to a ROM's file (Save) + flag it programmed.
       Whether they were written. */
-  async #save(compId, bytes, { stillHere = () => true } = {}) {
+  async #save(compId, bytes, { stillHere = null } = {}) {
     if (this.#sim?.running) {
       // The requesting window is told when a run starts and stops, but a Save
       // can cross that message in flight — so this, not the window's own
@@ -220,13 +221,19 @@ export class MemoryBridge {
     }
     const info = this.#romInfo(compId);
     if (!info) return false;
+    // A write that may outlive its desk (`stillHere`, the CPU monitor's keep)
+    // takes the file's bytes first, to put back if it does: written without
+    // the chip flagged, the file and the document would disagree — the next
+    // run on that desktop reading bytes its chip does not say it holds.
+    const was = stillHere ? await this.#currentBytes(info) : null;
     const res = await this.#bridge?.mem?.write(info.guid, bytes);
     if (res?.ok === false) {
       this.#warn("danger", t("memory.saveFailed"), res.error);
       return false;
     }
-    if (!stillHere()) {
-      console.warn(`[renderer] ${compId}'s kept bytes came back after its desk had gone; not flagged`); // prettier-ignore
+    if (stillHere && !stillHere()) {
+      console.warn(`[renderer] ${compId}'s kept bytes came back after its desk had gone; put back`); // prettier-ignore
+      if (was?.length) await this.#bridge?.mem?.write(info.guid, Uint8Array.from(was)); // prettier-ignore
       return false;
     }
     // The source file KEEPS its place and is marked instead: it is still where

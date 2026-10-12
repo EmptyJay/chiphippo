@@ -39,6 +39,9 @@ test("an install that did not happen says so, replacing the Restart offer", () =
     window.dispatchEvent(new CustomEvent(`chiphippo:updater-${name}`, { detail })); // prettier-ignore
   push("downloaded", { version: "9.9.9" });
   assert.equal(shown.at(-1).actionLabel, "Restart");
+  push("preparing");
+  assert.equal(shown.at(-1).title, "Preparing the update");
+  assert.match(shown.at(-1).message, /asks about unsaved work first/);
   push("install-failed");
   const toast = shown.at(-1);
   assert.equal(toast.variant, "warning");
@@ -47,5 +50,5 @@ test("an install that did not happen says so, replacing the Restart offer", () =
   assert.equal(toast.key, "updater", "the same slot as the offer");
   assert.equal(toast.sticky, true);
   assert.equal(toast.actionLabel, "Restart", "and the offer stands");
-  assert.deepEqual(dismissed, ["updater", "updater"]);
+  assert.deepEqual(dismissed, ["updater", "updater", "updater"]);
 });

@@ -46,6 +46,7 @@ const { parseArgs } = require("./cli-args");
 const { CloseGuard } = require("./close-guard");
 const { guardWebContents } = require("./navigation-guard");
 const { guardIpcMain } = require("./ipc-guard");
+const { keepUnreadSlot } = require("./boot-slot");
 const i18n = require("./i18n");
 const updater = require("./updater");
 const { isStoreBuild, distribution } = require("./store-build");
@@ -466,26 +467,7 @@ function recoveryBoot(peeked, upgraded, notes = []) {
   try {
     meta = store.read(store.defaultProjectPath);
   } catch (err) {
-    // NOT READ is not unreadable: an I/O failure (a damaged file reads as
-    // null, set aside by io.readJSON) says nothing about the work in it,
-    // which may be the only copy. It is moved aside, never deleted — and if
-    // even that fails, HELD where it is (nothing this session writes or
-    // removes it; the next launch reads it again). Either way the user is
-    // told where it is.
-    console.error("[main] project:boot:recovery error:", err && err.message);
-    const aside = safeCall("project:boot:recovery-aside", () =>
-      store.setAsideDefaultProject(),
-    );
-    if (aside) {
-      notes.push(
-        `The work recovered from your last session could not be read. It is kept at ${aside}.`,
-      );
-    } else {
-      store.holdDefaultProject();
-      notes.push(
-        `The work recovered from your last session could not be read, and is left at ${store.defaultProjectPath} to try again next time. Until then, save this project with Save As.`,
-      );
-    }
+    keepUnreadSlot(store, notes, err);
     return null;
   }
   if (!meta) {
@@ -560,16 +542,28 @@ function openBootProject(notes) {
   // and a clean quit both drop it). Peek rather than read: the renderer has to
   // be able to ASK before anything is hydrated, or a recovery the user then
   // discards would already have overwritten the real project's ROM files.
-  const peeked = safeCall("project:boot:peek", () => store.peekRecovery());
+  // A slot that THROWS on a read (not one that is damaged — that reads as
+  // null) is kept, whichever read meets it first (`keepUnreadSlot`).
+  let peeked = null;
+  let unread = false;
+  try {
+    peeked = store.peekRecovery();
+  } catch (err) {
+    keepUnreadSlot(store, notes, err);
+    unread = true;
+  }
   if (peeked?.recoveryFor) {
     // Null when there is nothing to offer (recoveryBoot has dealt with the
     // slot): the boot goes on as if there had been no recovery.
     const recovered = recoveryBoot(peeked, upgraded, notes);
     if (recovered) return recovered;
-  } else if (store.hasDefaultProject()) {
-    const meta = safeCall("project:boot", () =>
-      store.read(store.defaultProjectPath),
-    );
+  } else if (!unread && store.hasDefaultProject()) {
+    let meta = null;
+    try {
+      meta = store.read(store.defaultProjectPath);
+    } catch (err) {
+      keepUnreadSlot(store, notes, err);
+    }
     if (meta) {
       establishPath(store.defaultProjectPath);
       if (upgraded?.length) meta.warnings = upgraded;
@@ -2270,7 +2264,18 @@ function registerIpc() {
   // electron-updater's quitAndInstall starts the installer before it quits
   // (Windows, Linux), so letting it trigger the ordinary before-quit question
   // left "Cancel" unable to stop the update it had already launched.
-  ipcMain.handle("updater:install", () => {
+  //
+  // On macOS that question waits for Squirrel to have the update
+  // (`updater.readyToInstall`): asked first, its "go" stood — autosave
+  // stopped — for as long as Squirrel took, and work done meanwhile was lost.
+  ipcMain.handle("updater:install", async () => {
+    const ready = await updater.readyToInstall({
+      onWait: () => sendToMain("updater:preparing"),
+    });
+    if (!ready) {
+      sendToMain("updater:install-failed");
+      return null;
+    }
     if (closeGuard.allows() || !canAskRenderer(mainWindow)) {
       installUpdate();
     } else {
@@ -2314,7 +2319,14 @@ function registerIpc() {
   ipcMain.handle("project:save", (_event, meta, filePath) => {
     const store = getProjectStore();
     const target = filePath ? knownPath(filePath) : store.defaultProjectPath;
-    store.write(target, meta);
+    try {
+      store.write(target, meta);
+    } catch (err) {
+      // The working slot is HELD (an unread recovery in it — boot-slot.js):
+      // an answer the renderer can say in its own words, not an error string.
+      if (err?.code === "SLOT_HELD") return { ok: false, code: "slot-held" };
+      throw err;
+    }
     if (filePath) {
       rememberProject(target);
       if (target !== path.resolve(store.defaultProjectPath)) {

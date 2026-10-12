@@ -138,7 +138,8 @@ paths:
       whether it reached a start. A CPU WAITING (`waiting`: the Z80 halted, the 6502
       in WAI/STP) starts nothing until an interrupt, so there a Step is ONE bus cycle
       (`idleFrom`, the track's cycle count) — it used to burn the whole budget, the
-      board run ~2000 clocks per press. Forwarded to the Worker (`CALLS`). A microstep mode
+      board run ~2000 clocks per press — and a Step that BECOMES waiting (pressed on
+      the HALT/WAI itself) ends the moment it does. Forwarded to the Worker (`CALLS`). A microstep mode
       (one counted edge) and a forecast of the whole instruction (`planOperation`)
       were built and REMOVED (Jason, 2026-10-10): the cores emulate results, not the
       silicon's cycle-by-cycle insides — see ui-chrome.md "CPU monitor".
@@ -160,12 +161,16 @@ paths:
       (`#cameBack`) where a routine that skips its inline arguments (`JSR PRIMM /
       .byte …`, an RST that steps its return address) comes back: an instruction start
       within `MAX_INLINE_BYTES` past the return address, the stack EXACTLY where the
-      call found it, straight after a TAKEN subroutine return (`isReturn`: RTS; RET,
-      RET cc — never RTI/RETI/RETN), and not the return of a call ending right there.
-      Such a routine has popped its return address, so inside it the stack is at the
-      call's level too: a nested call's RET, or a RET cc not taken, must not stop it
-      (they did once — 2026-10-11). The cheap tests run first; memory is read only
-      when they pass. A routine that leaves by a jump is not seen (runs on to Pause). A redundant DD/FD is part of the instruction it prefixes, in the
+      call found it, and NOTHING run between the return address and it since the Step
+      Over began (`over.ran`, the nearest start in the window, kept by `#noteRan`) — the
+      bytes there are the arguments, never executed. Such a routine pops its return
+      address, so inside it the stack is at the call's level too; a stop there would be
+      somewhere code has run (its own instructions, a nested CALL, an untaken RET cc).
+      Two earlier rules guessed from the bytes BEFORE the landing (is it a call ending
+      here?) and from the instruction before it (a taken RET?): both were fooled — an
+      argument ending in an RST opcode, a string with a space (JSR) two from its end, a
+      pushed return and a jump, an interrupt right after the RET (2026-10-11/12). No
+      memory is read; a routine that leaves by a jump far away runs on to Pause. A redundant DD/FD is part of the instruction it prefixes, in the
       core and the disassembler alike (`isCall` looks past it). First
       the Step's loop (`#runCpuStep`, up to `MAX_OVER_EDGES` inside the same 500 ms
       budget); a call that outlasts it is HANDED TO THE RUN: `#overStop` is armed (a

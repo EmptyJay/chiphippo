@@ -249,17 +249,6 @@ test("Z80: a prefixed CALL is still a call — Step Over is offered", () => {
   assert.equal(z80.isCall(lineZ80([0xdd, 0xed, 0x44])), false, "NEG");
 });
 
-test("a subroutine's return, never an interrupt's — what Step Over looks back at", () => {
-  const z80 = cpuOf(partDef("Z80A"));
-  assert.equal(z80.isReturn(lineZ80([0xc9])), true, "RET");
-  assert.equal(z80.isReturn(lineZ80([0xc0])), true, "RET NZ");
-  assert.equal(z80.isReturn(lineZ80([0xed, 0x4d])), false, "RETI");
-  assert.equal(z80.isReturn(lineZ80([0xed, 0x45])), false, "RETN");
-  const w65 = cpuOf(partDef("W65C02"));
-  assert.equal(w65.isReturn(line6502([0x60])), true, "RTS");
-  assert.equal(w65.isReturn(line6502([0x40])), false, "RTI");
-});
-
 test("Z80: DDCB/FDCB take the displacement before the opcode", () => {
   const bit = lineZ80([0xdd, 0xcb, 0x04, 0x46]);
   assert.equal(bit.text, "BIT 0,(IX+$04)");

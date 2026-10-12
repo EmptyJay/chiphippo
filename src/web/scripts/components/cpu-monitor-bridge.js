@@ -100,6 +100,7 @@ export class CpuMonitorBridge {
   #notifications;
   #editedRoms = new Set(); // ROMs poked during this run
   #leaving = null; // a swap's `desk-leaving` detail, until its Stop has run
+  #keeping = new Set(); // keeps still writing (a swap waits for them all)
   #desk = 0; // counts documents put on the desk (the window's `desk`)
   #queued = false;
 
@@ -146,6 +147,9 @@ export class CpuMonitorBridge {
     window.addEventListener("chiphippo:desk-leaving", (e) => {
       this.#leaving = e.detail ?? {};
       queueMicrotask(() => (this.#leaving = null));
+      // A keep from an EARLIER Stop (a Stop, then a quick switch) still
+      // writing into the desk being left: the swap waits for it too.
+      for (const kept of this.#keeping) e.detail?.hold?.(kept);
     });
     window.addEventListener("chiphippo:cpumonitor-host-inbound", (e) =>
       this.#receive(e.detail),
@@ -289,6 +293,8 @@ export class CpuMonitorBridge {
       const bytes = detail?.images?.get(compId);
       if (!bytes) continue;
       const kept = this.#keep(compId, bytes);
+      this.#keeping.add(kept);
+      kept.finally(() => this.#keeping.delete(kept));
       leaving?.hold?.(kept);
     }
   }

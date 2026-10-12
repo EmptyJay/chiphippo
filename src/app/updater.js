@@ -239,6 +239,65 @@ let pendingInstall = null;
 // proxy first, which takes seconds for a large app — never a minute.
 const INSTALL_DEADLINE_MS = 60_000;
 
+// How long Restart waits for Squirrel to have the update before it gives up.
+// Nothing is at stake while it waits — the unsaved-work question has not been
+// asked, autosave runs, the app is the app — so it can be generous.
+const SQUIRREL_WAIT_MS = 5 * 60_000;
+
+// The wait under way, joined by a second Restart rather than stacked.
+let readyWait = null;
+
+/**
+ * Resolve TRUE once an install would start at once — always, but on macOS
+ * while Squirrel is still taking the download from electron-updater — or
+ * FALSE if it does not get there in `waitMs` (or the app quits meanwhile:
+ * `autoInstallOnAppQuit` has that one).
+ *
+ * Restart waits HERE, before main asks about unsaved work: asked first, the
+ * "go" stood while Squirrel took its time — autosave stopped, the recovery
+ * copy dropped, the window looking as ever — and anything done meanwhile was
+ * lost to the restart, or to a quit that no longer asked (2026-10-11).
+ * `onWait` is told when there IS a wait, so the window can say so.
+ *
+ * @param {{waitMs?: number, platform?: string, onWait?: () => void}} [opts]
+ * @returns {Promise<boolean>}
+ */
+function readyToInstall({
+  waitMs = SQUIRREL_WAIT_MS,
+  platform = process.platform,
+  onWait,
+} = {}) {
+  // prettier-ignore
+  let autoUpdater = null;
+  try {
+    autoUpdater = getAutoUpdater();
+  } catch {
+    return Promise.resolve(false);
+  }
+  if (platform !== "darwin" || autoUpdater.squirrelDownloadedUpdate !== false) {
+    return Promise.resolve(true);
+  }
+  const native = nativeUpdater();
+  if (!native) return Promise.resolve(true);
+  onWait?.();
+  readyWait ??= new Promise((resolve) => {
+    let timer = null;
+    const done = (ok) => {
+      clearTimeout(timer);
+      native.removeListener?.("update-downloaded", ready);
+      app.removeListener?.("before-quit", quit);
+      readyWait = null;
+      resolve(ok);
+    };
+    const ready = () => done(true);
+    const quit = () => done(false);
+    native.once?.("update-downloaded", ready);
+    app.once?.("before-quit", quit);
+    timer = setTimeout(quit, waitMs);
+  });
+  return readyWait;
+}
+
 function quitAndInstall(
   onFailed,
   { deadlineMs = INSTALL_DEADLINE_MS, platform = process.platform } = {},
@@ -314,4 +373,9 @@ function quitAndInstall(
   install();
 }
 
-module.exports = { initUpdater, checkForUpdates, quitAndInstall };
+module.exports = {
+  initUpdater,
+  checkForUpdates,
+  readyToInstall,
+  quitAndInstall,
+};

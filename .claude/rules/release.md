@@ -30,6 +30,13 @@ to turn this on.
   on a normal quit (`autoInstallOnAppQuit`) or through a clicked `quitAndInstall()`, which
   still runs main's ordinary before-quit guard, so an unsaved project is asked about first
   and a cancelled quit leaves the update for next time.
+- **Restart waits for the update to be READY before it asks anything**
+  (`updater.readyToInstall`, from main's `updater:install`): on macOS, while Squirrel is
+  still taking the download (`squirrelDownloadedUpdate === false`), main pushes
+  `updater:preparing` (an UpdaterMonitor toast) and waits on its own native listener, up
+  to `SQUIRREL_WAIT_MS` (5 min; a second Restart joins the wait; a quit ends it), and
+  only THEN asks the close guard and installs. Asked first, the guard's "go" stood —
+  autosave stopped, no question on quit — for as long as Squirrel took (2026-10-11).
 - **A clicked install that does not happen is taken back, and leaves nothing armed**
   (`quitAndInstall` in `updater.js`): an error, or no quit within `INSTALL_DEADLINE_MS`,
   withdraws the close guard's "go" (`app:close-aborted`) and says so

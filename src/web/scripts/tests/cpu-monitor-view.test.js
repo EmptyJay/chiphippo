@@ -696,6 +696,21 @@ test("a desktop swap's Stop holds the swap until the edits are kept, on the desk
   assert.equal(h.saved.length, 2);
 });
 
+test("a keep from an earlier Stop, still writing, holds a swap that starts meanwhile", async () => {
+  const h = keepHarness({ keepEdits: true });
+  h.run();
+  h.stop(); // a plain Stop: its keep is under way…
+  const holds = [];
+  window.dispatchEvent(new CustomEvent("chiphippo:desk-leaving", { detail: { project: false, hold: (p) => holds.push(p) } })); // prettier-ignore
+  assert.equal(holds.length, 1, "…and the switch waits for it");
+  await Promise.all(holds);
+  assert.deepEqual(h.saved, [["c2", [0xea]]]);
+  await h.tick();
+  const later = [];
+  window.dispatchEvent(new CustomEvent("chiphippo:desk-leaving", { detail: { project: false, hold: (p) => later.push(p) } })); // prettier-ignore
+  assert.equal(later.length, 0, "a finished keep holds nothing");
+});
+
 test("a project swap's Stop keeps nothing — that project is already saved or discarded", async () => {
   const h = keepHarness({ keepEdits: true });
   h.run();

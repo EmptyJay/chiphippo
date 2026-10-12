@@ -70,7 +70,7 @@ function bench() {
  * one-corner geometry becomes a dead straight run once one end is allowed to
  * slide a row), and a test that cannot tell "wrong" from "improved" is no test.
  * The end chooser has its own section at the bottom of this file, and the
- * shipped configuration is exercised end to end by `autoroute-corpus.test.js`.
+ * shipped configuration is exercised end to end by the corpus (`autoroute-corpus.js`).
  */
 const FIXED_ENDS = makeRouteConfig({ swapNodeEnds: false });
 const run = (doc, opts = {}) =>

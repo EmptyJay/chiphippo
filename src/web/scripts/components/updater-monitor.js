@@ -93,6 +93,17 @@ export class UpdaterMonitor {
     // put explains nothing — and the offer stays, Restart and all, since the
     // update is still downloaded (a quit installs it only if Squirrel has it,
     // so that is not promised).
+    // Restart pressed before the update was ready to install (macOS, while
+    // Squirrel takes it): nothing happens for a while, so say why — the
+    // question about unsaved work, and the restart, come when it is.
+    window.addEventListener("chiphippo:updater-preparing", () => {
+      this.#show({
+        variant: "info",
+        title: t("updater.preparing"),
+        message: t("updater.preparingMessage"),
+      });
+    });
+
     window.addEventListener("chiphippo:updater-install-failed", () => {
       this.#show({
         variant: "warning",

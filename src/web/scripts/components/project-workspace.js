@@ -195,6 +195,8 @@ export class ProjectWorkspace {
   #locked = false; // editing frozen (the circuit is running)
   #examples = new Map(); // ref → the in-flight openExample promise
   #swaps = Promise.resolve(); // the desk swaps asked for, run one at a time
+  #selecting = null; // a tab switch queued and not yet begun…
+  #selectTo = null; // …and the tab it goes to: the last one clicked
   #inFlight = null; // the write chain's tail, or null when nothing is writing
   #busy = false; // a leave/quit question is out, or a project is being swapped
   #autoSaveMs = 0; // 0 = off
@@ -203,6 +205,10 @@ export class ProjectWorkspace {
   #autoStopped = false; // the app is going away; nothing more may write
   #autoSaveFailed = false; // one quiet failure retires it (see autoSaveNow)
   #imagesTouched = false; // a ROM's bytes changed without the document changing
+  // …counted, against the count the FILE last took (`dirty`): a write that
+  // was under way when they changed again has not saved the newer bytes.
+  #imageEdits = 0;
+  #imageEditsSaved = 0;
   #onHide = null; // the window-hidden flush listener, for teardown
 
   /**
@@ -487,7 +493,13 @@ export class ProjectWorkspace {
    * not changes to keep or throw away.
    */
   get dirty() {
-    return this.isOpen && this.#signature() !== this.#saved;
+    if (!this.isOpen) return false;
+    // A ROM's bytes changed with the document as it was (`markImagesChanged`:
+    // a chip already flagged programmed and edited, re-saved or kept again) —
+    // the file still holds the old ones, and a quit that did not ask would
+    // leave them to be copied back over the new at the next open.
+    if (this.#imageEdits !== this.#imageEditsSaved) return true;
+    return this.#signature() !== this.#saved;
   }
 
   /**
@@ -872,6 +884,8 @@ export class ProjectWorkspace {
    */
   markImagesChanged() {
     this.#imagesTouched = true;
+    this.#imageEdits += 1;
+    this.#announce(); // the • may be new
   }
 
   /**
@@ -1147,9 +1161,16 @@ export class ProjectWorkspace {
     this.#announce();
   }
 
-  /** Put another desktop on the desk. */
+  /** Put another desktop on the desk. Clicks made before the switch gets
+      its turn are ONE switch, to the last tab clicked — not a desk loaded
+      and left for each. */
   selectTab(id) {
-    return this.#oneSwapAtATime(() => this.#selectTab(id));
+    this.#selectTo = id;
+    this.#selecting ??= this.#oneSwapAtATime(() => {
+      this.#selecting = null;
+      return this.#selectTab(this.#selectTo);
+    });
+    return this.#selecting;
   }
 
   async #selectTab(id) {
@@ -1469,9 +1490,12 @@ export class ProjectWorkspace {
     if (!this.#project) return;
     const wasActive = this.#project.activeTab === id;
     this.#stash(); // whatever is on screen belongs to the ACTIVE desktop
+    if (!removeDesktop(this.#project, id)) return;
+    if (wasActive) await this.#leaveActiveDesk();
+    // From the project as the leave left it: a rename (or a chip saved into
+    // the project) during its wait is kept.
     const next = removeDesktop(this.#project, id);
     if (!next) return;
-    if (wasActive) await this.#leaveActiveDesk();
     this.#project = next;
     this.#state.delete(id);
     if (wasActive) this.#loadActive();
@@ -1507,6 +1531,7 @@ export class ProjectWorkspace {
     // fires — can read `dirty` against the OUTGOING project's baseline and
     // flash a • the user never earned.
     this.#saved = projectSignature(this.#project);
+    this.#imageEditsSaved = this.#imageEdits;
     this.#state.clear();
     this.#renderTabs();
     // The padlock is the project's, so a project arriving brings its own.
@@ -1547,6 +1572,7 @@ export class ProjectWorkspace {
    */
   #markClean() {
     if (!this.#project) return;
+    this.#imageEditsSaved = this.#imageEdits;
     this.#saved = this.#signature();
     this.#stashed = this.#saved; // nothing pending, so nothing to re-stash
   }
@@ -1688,6 +1714,10 @@ export class ProjectWorkspace {
    */
   async #leaveActiveDesk() {
     await this.#stopForSwap();
+    // Run pressed during that wait started a run on the desk being left —
+    // which must not carry on under the next desk. Stopped too (its own
+    // keeps waited for); a few times at most, never a loop with the user.
+    for (let i = 0; i < 3 && this.#sim?.running; i++) await this.#stopForSwap();
     // AFTER the Stop has finished with it: what the Stop writes into the desk
     // (a ROM's run edits kept, its chip flagged) belongs to the desktop left.
     this.#stash();
@@ -1716,8 +1746,13 @@ export class ProjectWorkspace {
     // desk gone and flags nothing (MemoryBridge `keepRunEdits` `stillHere`).
     let timer = null;
     const late = new Promise((r) => (timer = setTimeout(r, this.#holdMs)));
-    await Promise.race([Promise.allSettled(holds), late]);
-    clearTimeout(timer);
+    this.#tabsView?.setBusy?.(true); // what is clicked now waits its turn
+    try {
+      await Promise.race([Promise.allSettled(holds), late]);
+    } finally {
+      clearTimeout(timer);
+      this.#tabsView?.setBusy?.(false);
+    }
   }
 
   /** Put the active desktop's document on the desk, with its own history. */
@@ -1846,7 +1881,13 @@ export class ProjectWorkspace {
     try {
       this.#stash(); // the file gets what is on screen, not the last stash
       const written = projectForFile(this.#project);
+      const imageEdits = this.#imageEdits; // what this write carries
       const res = await this.#bridge.project.save(written, location);
+      if (res?.code === "slot-held") {
+        this.#fail(t("workspace.failSave"), new Error(t("workspace.slotHeld")), { quiet }); // prettier-ignore
+        return false;
+      }
+      this.#imageEditsSaved = imageEdits;
       if (location) this.#project.location = res?.path ?? location;
       // Both baselines: the file now holds this, and main dropped any stash
       // that was standing for it — nothing for the next tick to catch up.

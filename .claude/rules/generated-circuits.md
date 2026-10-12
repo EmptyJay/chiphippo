@@ -136,7 +136,7 @@ Every benchable 74xx part's demonstration bench, shipped INSIDE the app as
 - **The passives' examples** (2026-10-11): `cap-electrolytic` → `demos/rc.chiphippo`
   (Fade: one button charges 1000 µF and 220 µF through a 1N4148 each, each LED then
   fades along its own RC — 4.5× as long; Timer: 10 kΩ · 100 µF into a CD40106B, the
-  LED 0.87 s on / 0.97 s off behind the switch) and `inductor` → `demos/lc.chiphippo`
+  LED 0.87 s on / 0.96 s off behind the switch) and `inductor` → `demos/lc.chiphippo`
   (Ringing: a 1 kHz clock ÷1024 on a CD4040B steps a 680 Ω / 2 × 2.2 kΩ divider into
   10 H — coil, 3 holes, Lowest winding, ~1 kΩ — and 1 µF: ~49 Hz, ~44 % overshoot,
   the ring spanning 0.2–4.8 V of the analyzer's lane). Spice Lite ONLY,

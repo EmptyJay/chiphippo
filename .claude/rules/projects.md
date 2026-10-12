@@ -91,6 +91,11 @@ Code: `app/store/project-store.js` + `project-images.js` + `project-migrate.js` 
 `project:boot`/`:new`/`:open`/`:open-recent`/`:save`/`:choose-path`/`:regrant`, plus
 `desktop:export`/`:import`/`:duplicate`.
 
+- **ROM bytes are part of `dirty`** (2026-10-11): `markImagesChanged` (MemoryBridge, after
+  a programmer load, an inspector Save or a CPU monitor keep) counts `#imageEdits`, and the
+  project is dirty until a FILE write takes that count (`#doWrite`; a recovery stash does
+  not) — a chip already flagged programmed and edited re-saved left the document
+  identical, so a quit did not ask and the next open copied the file's older bytes back.
 - **A desk swap is one thing at a time, and waits for its Stop** (2026-10-11).
   `#leaveActiveDesk` = `#stopForSwap` (dispatches `chiphippo:desk-leaving` with
   `{project, hold}`, Stops, awaits what was `hold()`-ed — the CPU monitor's kept ROM edits
@@ -102,6 +107,11 @@ Code: `app/store/project-store.js` + `project-images.js` + `project-migrate.js` 
   awaits the queue first, so a quit's question and save see the kept edits. A write
   coming back after its desk has gone flags nothing (`keepRunEdits`' `stillHere`). A
   PROJECT swap (`project: true`) keeps no edits — that project was saved or discarded.
+  While a swap waits the strip shows `project-tabs--busy`; tab clicks made before a
+  switch gets its turn are ONE switch to the last tab clicked (`#selecting`/`#selectTo`);
+  a Run started during the wait is stopped too; a keep from an EARLIER Stop still
+  writing is held by the next swap (the bridge's `#keeping`); and a keep whose desk has
+  gone by the time its write lands puts the file back (`#save` reads it first).
 - **A tab is a DOCUMENT, not a second desk.** There is exactly one `DeskView` /
   `DeskController` / `SimController` / palette / guide / analyzer; switching desktops
   SWAPS THE DOCUMENT in place through `DeskController.loadDocument` — the same
@@ -153,6 +163,13 @@ Code: `app/store/project-store.js` + `project-images.js` + `project-migrate.js` 
     live in a sidecar; `setMemoryProgrammed` writes `true` over `true`, and for a re-load
     of the SAME file an identical `storage` too), so `MemoryBridge` reports it through an
     injected `onImagesChanged`.
+  - **A slot that THROWS on a read is never deleted** (`app/boot-slot.js`
+    `keepUnreadSlot`, 2026-10-11): whichever read meets the I/O error first — the
+    recovery PEEK, the recovery read or the untitled project's read — the slot is moved
+    aside (`setAsideDefaultProject`, `default.chiphippo.unread-<ts>`) or, if even that
+    fails, HELD for the session (`holdDefaultProject`: no write, no remove, a new project
+    written nowhere), and a startup note names where it is. A DAMAGED slot (bad JSON)
+    reads as null and is quarantined by `io.readJSON`, as before.
   - **A restore is not a question.** `recoveryBoot` restores the stash outright and the
     renderer says so (`workspace.recovered*` — main hands over the FACTS
     `{name, path, homeless}`, since `m()` is for text MAIN renders). Restored work

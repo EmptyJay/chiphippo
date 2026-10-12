@@ -1282,6 +1282,7 @@
     "failStart": "无法启动项目",
     "failOpen": "无法打开项目",
     "failSave": "无法保存项目",
+    "slotHeld": "无法读取上次会话中未保存的项目，因此它保留在本项目原本的保存位置。请使用“另存为”为本项目指定单独的文件。",
     "failClose": "无法检查未保存的更改 — 请在退出前保存您的工作",
     "failLocation": "无法选择保存位置",
     "failDuplicate": "无法复制该桌面",
@@ -1456,7 +1457,9 @@
     "upToDate": "已是最新",
     "checkFailed": "检查更新失败",
     "installFailed": "未安装更新",
-    "installFailedMessage": "现在无法安装更新，因此 Chip Hippo 仍以此版本保持打开。按“重启”可再试一次。"
+    "installFailedMessage": "现在无法安装更新，因此 Chip Hippo 仍以此版本保持打开。按“重启”可再试一次。",
+    "preparing": "正在准备更新",
+    "preparingMessage": "更新准备就绪后，Chip Hippo 将以新版本重启，重启前会询问未保存的工作。在此期间可以继续工作。"
   },
   "bus": {
     "rename": "重命名总线…",
