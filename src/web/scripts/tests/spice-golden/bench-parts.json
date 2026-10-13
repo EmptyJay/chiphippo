@@ -1,0 +1,160 @@
+{
+  "area": "bench-parts",
+  "title": "Bench parts",
+  "ngspice": "ngspice-44.2",
+  "cases": {
+    "uln2003a-5v-1k": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.647849
+      }
+    },
+    "uln2003a-5v-100": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.7530371
+      }
+    },
+    "uln2003a-12v-100": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.8580898
+      }
+    },
+    "uln2003a-12v-24": {
+      "reference": "device",
+      "values": {
+        "out/V": 1.312185
+      }
+    },
+    "uln2003a-5v-100-in-10k": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.7778269,
+        "in/V": 2.121055
+      }
+    },
+    "uln2003a-5v-100-in-100k": {
+      "reference": "device",
+      "values": {
+        "out/V": 5,
+        "in/V": 0.5713082
+      }
+    },
+    "uln2003a-12v-100-in-47k": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.9154329,
+        "in/V": 1.967538
+      }
+    },
+    "opto-4n35-470-1k": {
+      "reference": "same",
+      "values": {
+        "collector/V": 0.2178218
+      }
+    },
+    "opto-4n35-4.7k-1k": {
+      "reference": "same",
+      "values": {
+        "collector/V": 10.16544
+      }
+    },
+    "opto-4n35-47k-1k": {
+      "reference": "same",
+      "values": {
+        "collector/V": 11.95142
+      }
+    },
+    "opto-4n35-4.7k-10k": {
+      "reference": "same",
+      "values": {
+        "collector/V": 0.1118881
+      }
+    },
+    "opto-4n35-2.2k-4.7k": {
+      "reference": "same",
+      "values": {
+        "collector/V": 0.1252654
+      }
+    },
+    "lm358-x2-8k-1k": {
+      "reference": "same",
+      "values": {
+        "out/V": 2.000035
+      }
+    },
+    "lm358-x2-2k-1k": {
+      "reference": "same",
+      "values": {
+        "out/V": 5.999955
+      }
+    },
+    "lm358-x2-1k-1k": {
+      "reference": "same",
+      "values": {
+        "out/V": 7.492507
+      }
+    },
+    "lm7805-9v-1k": {
+      "reference": "same",
+      "values": {
+        "out/V": 4.99995
+      }
+    },
+    "lm7805-9v-100": {
+      "reference": "same",
+      "values": {
+        "out/V": 4.9995
+      }
+    },
+    "lm7805-9v-22": {
+      "reference": "same",
+      "values": {
+        "out/V": 4.997728
+      }
+    },
+    "lm7805-6v-100": {
+      "reference": "same",
+      "values": {
+        "out/V": 3.9996
+      }
+    },
+    "lm7805-9v-load-cc": {
+      "reference": "same",
+      "values": {
+        "out/V": 4.9975
+      }
+    },
+    "lm7805-9v-load-cr": {
+      "reference": "same",
+      "values": {
+        "out/V": 4.998936
+      }
+    },
+    "lm317-240-240": {
+      "reference": "same",
+      "values": {
+        "out/V": 2.511896
+      }
+    },
+    "lm317-240-390": {
+      "reference": "same",
+      "values": {
+        "out/V": 3.300613
+      }
+    },
+    "lm317-240-1k": {
+      "reference": "same",
+      "values": {
+        "out/V": 6.508064
+      }
+    },
+    "lm317-240-2k": {
+      "reference": "same",
+      "values": {
+        "out/V": 11.76618
+      }
+    }
+  }
+}

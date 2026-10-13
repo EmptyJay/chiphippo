@@ -1,0 +1,79 @@
+{
+  "area": "cd4000-timers",
+  "title": "CD4000 timers",
+  "ngspice": "ngspice-44.2",
+  "cases": {
+    "cd4060b-osc-100k-1u-rs-220k": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.216975,
+        "high/s": 0.108515,
+        "low/s": 0.10846
+      }
+    },
+    "cd4060b-osc-10k-10u-rs-22k": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.224015,
+        "high/s": 0.112035,
+        "low/s": 0.11198
+      }
+    },
+    "cd4060b-osc-100k-1u-rs-1M": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.219725,
+        "high/s": 0.10989,
+        "low/s": 0.109835
+      }
+    },
+    "cd4541b-osc-100k-1u-rs-220k": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.216975,
+        "high/s": 0.108515,
+        "low/s": 0.10846
+      }
+    },
+    "cd4047b-astable-osc-100k-1u": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.220605,
+        "high/s": 0.110329779,
+        "low/s": 0.110275221
+      }
+    },
+    "cd4047b-astable-q-100k-1u": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.44099,
+        "high/s": 0.220549559,
+        "low/s": 0.220440441
+      }
+    },
+    "cd4098b-pulse-100k-1u": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.25,
+        "high/s": 0.050341992,
+        "low/s": 0.199658008
+      }
+    },
+    "cd4528b-pulse-100k-1u": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.25,
+        "high/s": 0.032529992,
+        "low/s": 0.217470008
+      }
+    },
+    "cd4538b-pulse-100k-1u": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.25,
+        "high/s": 0.100327992,
+        "low/s": 0.149672008
+      }
+    }
+  }
+}

@@ -1,0 +1,332 @@
+/*
+ * Copyright 2026 Jason Figge
+ *
+ * This file is part of Chip Hippo.
+ *
+ * Chip Hippo is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option)
+ * any later version.
+ *
+ * Chip Hippo is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with Chip Hippo. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+// What a frame shows of a lamp — its brightness averaged over the time the
+// frame covers (sim/lamp-average.js) — and a switch's contact bounce
+// (sim/bounce.js), each on its own and as SimController runs them.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { resetDom } from "./jsdom-setup.js";
+import { bench } from "./timing-fixtures.js";
+import { partDef } from "../catalog/index.js";
+import { buildNetlist } from "../sim/netlist.js";
+import { LampAverage } from "../sim/lamp-average.js";
+import {
+  BOUNCE_MAX_S,
+  ContactBounce,
+  bounceIntervals,
+  gapContacts,
+} from "../sim/bounce.js";
+import { normalizeSpiceConfig } from "../sim/spice/config.js";
+
+const { SimController } = await import("../components/sim-controller.js");
+
+// ── The pure halves ────────────────────────────────────────────────────────
+
+test("a lamp's frame average: brightness × the time each tick held it", () => {
+  const avg = new LampAverage();
+  // A 20 % PWM at 250 Hz: on for 0.8 ms of every 4 ms, over 40 ms.
+  for (let k = 0; k < 10; k++) {
+    avg.record(k * 4e-3, new Map([["d1", 1]]));
+    avg.record(k * 4e-3 + 0.8e-3, new Map([["d1", 0]]));
+  }
+  const mean = avg.take(40e-3).get("d1");
+  assert.ok(Math.abs(mean - 0.2) < 1e-9, `a fifth: ${mean}`);
+  // A lamp that did not change in a frame: nothing averaged.
+  avg.record(50e-3, new Map([["d1", 0]]));
+  assert.equal(avg.take(80e-3), null, "steady: the tick's own picture");
+  // A frame covering no time: nothing either.
+  assert.equal(avg.take(80e-3), null);
+});
+
+test("a bounce: a travel gap, then touches, all within its few milliseconds", () => {
+  const gaps = bounceIntervals("s1#1");
+  assert.equal(gaps[0][0], 0, "open from the moment the actuator moves");
+  assert.ok(gaps.length >= 3, `${gaps.length} gaps`);
+  for (let k = 1; k < gaps.length; k++) {
+    assert.ok(gaps[k][0] > gaps[k - 1][1], "in order, with a touch between");
+  }
+  assert.ok(gaps.at(-1)[1] < BOUNCE_MAX_S);
+  assert.deepEqual(bounceIntervals("s1#1"), gaps, "the same press, the same bounce"); // prettier-ignore
+  assert.notDeepEqual(bounceIntervals("s1#2"), gaps, "the next one differs");
+  // A slide switch's gaps keep no throw at all; a DIP bank keeps the
+  // positions that did not move.
+  assert.deepEqual(gapContacts([[2, 1]], [[2, 3]]), []);
+  assert.deepEqual(
+    gapContacts(
+      [[1, 8]],
+      [
+        [1, 8],
+        [2, 7],
+      ],
+    ),
+    [[1, 8]],
+  );
+});
+
+test("only a closing contact bounces, and only when asked to", () => {
+  const b = bench();
+  b.seat("s1", "sw-toggle", "a40");
+  const doc = (on) => ({ ...b.doc, components: b.doc.components.map((c) => (c.id === "s1" ? { ...c, params: { on } } : c)) }); // prettier-ignore
+  const bounce = new ContactBounce();
+  bounce.watch(doc(false), new Map(), 0, true); // first seen: remembered
+  assert.equal(bounce.active, false);
+  bounce.watch(doc(true), new Map(), 1, true); // closes: bounces
+  assert.equal(bounce.active, true);
+  assert.equal(bounce.gapsAt(1).get("s1")?.length, 0, "open at the press");
+  assert.equal(bounce.gapsAt(1.01).size, 0, "closed for good 10 ms on");
+  bounce.watch(doc(false), new Map(), 2, true); // opens: clean
+  assert.equal(bounce.gapsAt(2).size, 0);
+  bounce.watch(doc(true), new Map(), 3, false); // closes, not asked: clean
+  assert.equal(bounce.gapsAt(3).size, 0);
+});
+
+test("the setting: Switch bounce is off unless exactly true", () => {
+  assert.equal(normalizeSpiceConfig(null).bounce, false);
+  assert.equal(normalizeSpiceConfig({ bounce: "yes" }).bounce, false);
+  assert.equal(normalizeSpiceConfig({ bounce: true }).bounce, true);
+});
+
+// ── As SimController runs them ─────────────────────────────────────────────
+
+/** A DeskDoc stand-in over a plain document. */
+function fakeDoc(raw) {
+  const doc = JSON.parse(JSON.stringify(raw));
+  return {
+    toJSON: () => doc,
+    getComponent: (id) => doc.components.find((c) => c.id === id) ?? null,
+    setComponentParams(id, patch) {
+      const c = doc.components.find((x) => x.id === id);
+      c.params = { ...c.params, ...patch };
+      return c;
+    },
+  };
+}
+
+/** A wall clock the test drives: `advance(ms)` fires every timer due. */
+function drivenClock() {
+  let now = 0;
+  let seq = 0;
+  const timers = new Map();
+  return {
+    now: () => now,
+    setTimeout(fn, ms) {
+      const id = ++seq;
+      timers.set(id, { fn, at: now + Math.max(0, ms) });
+      return id;
+    },
+    clearTimeout(id) {
+      timers.delete(id);
+    },
+    advance(ms) {
+      const end = now + ms;
+      for (;;) {
+        let next = null;
+        for (const [id, t] of timers) {
+          if (t.at <= end && (!next || t.at < next[1].at)) next = [id, t];
+        }
+        if (!next) break;
+        timers.delete(next[0]);
+        now = Math.max(now, next[1].at);
+        next[1].fn();
+      }
+      now = end;
+    },
+  };
+}
+
+/** Every sim-state and sim-tick from here on. */
+function capture() {
+  const states = [];
+  const ticks = [];
+  const onState = (e) => states.push(e.detail);
+  const onTick = (e) => ticks.push(e.detail);
+  window.addEventListener("chiphippo:sim-state", onState);
+  window.addEventListener("chiphippo:sim-tick", onTick);
+  return {
+    states,
+    ticks,
+    stop() {
+      window.removeEventListener("chiphippo:sim-state", onState);
+      window.removeEventListener("chiphippo:sim-tick", onTick);
+    },
+  };
+}
+
+/** A clock brick's PWM (`duty` %) into an LED and 330 Ω to ground. */
+function pwmLed(hz, duty) {
+  const b = bench();
+  b.doc.components.push({ id: "clk1", kind: "clock", ref: "clock", x: 20, y: 30, params: partDef("clock").normalizeParams({ hz, wave: "pwm", duty }) }); // prettier-ignore
+  b.doc.wires.push(
+    { id: "wc1", from: "psu1.+", to: "clk1.vcc", color: "red" },
+    { id: "wc2", from: "psu1.-", to: "clk1.gnd", color: "black" },
+    { id: "wc3", from: "clk1.out", to: b.at("e5"), color: "blue" },
+  );
+  const d = b.seat("d1", "led", "a20", { color: "red" });
+  b.link("a5", d.get(1));
+  const r = b.seat("r1", "resistor", "a30", { ohms: 330 });
+  b.link(d.get(2), r.get(1));
+  b.gnd(r.get(2));
+  return b.doc;
+}
+
+for (const spice of [false, true]) {
+  test(`${spice ? "Spice Lite" : "the logic engine"}: an LED on a 250 Hz PWM at 20 % shows a fifth as bright`, () => {
+    resetDom();
+    const clock = drivenClock();
+    const sim = new SimController({
+      deskDoc: fakeDoc(pwmLed(250, 20)),
+      notifications: { notify() {}, dismiss() {} },
+      clock,
+    });
+    sim.setSpiceLite({ enabled: spice });
+    const cap = capture();
+    sim.start();
+    clock.advance(400);
+    const glows = cap.states
+      .filter((s) => s.running && s.lampGlow)
+      .map((s) => s.lampGlow.get("d1"));
+    assert.ok(glows.length >= 5, `averaged frames: ${glows.length}`);
+    // Each LIT moment's own brightness: 1 on the logic engine, its level
+    // (its current against its datasheet's) under Spice Lite.
+    const lit = spice
+      ? cap.ticks.map((t) => t.lamps?.get("d1")).find((v) => v?.lit)?.level
+      : 1;
+    for (const g of glows.slice(2)) {
+      assert.ok(Math.abs(g - 0.2 * lit) < 0.05 * lit, `≈ ${0.2 * lit}: ${g}`);
+    }
+    sim.stop();
+    assert.equal(cap.states.at(-1).lampGlow, null, "stopped: nothing");
+    cap.stop();
+  });
+}
+
+test("a steady LED is drawn as the tick left it — nothing averaged", () => {
+  resetDom();
+  const clock = drivenClock();
+  const b = bench();
+  const d = b.seat("d1", "led", "a20", { color: "red" });
+  b.vcc(d.get(1));
+  const r = b.seat("r1", "resistor", "a30", { ohms: 330 });
+  b.link(d.get(2), r.get(1));
+  b.gnd(r.get(2));
+  const sim = new SimController({ deskDoc: fakeDoc(b.doc), notifications: { notify() {}, dismiss() {} }, clock }); // prettier-ignore
+  const cap = capture();
+  sim.start();
+  clock.advance(200);
+  assert.ok(cap.states.filter((s) => s.running).every((s) => s.lampGlow == null)); // prettier-ignore
+  sim.stop();
+  cap.stop();
+});
+
+/** A push button from node N (a 10 kΩ pull-up) to ground, N into a 74LS04
+    input: N's level in every tick after the press. */
+function pressButton({ bounce }) {
+  resetDom();
+  const clock = drivenClock();
+  const b = bench();
+  const u = b.seat("u1", "74LS04", "e10");
+  b.vcc(u.get(14));
+  b.gnd(u.get(7));
+  const s = b.seat("s1", "sw-push", "a40");
+  b.gnd(s.get(1));
+  const up = b.seat("r1", "resistor", "a30", { ohms: 10e3 });
+  b.vcc(up.get(1));
+  b.link(up.get(2), s.get(2));
+  b.link(s.get(2), u.get(1));
+  const sim = new SimController({ deskDoc: fakeDoc(b.doc), notifications: { notify() {}, dismiss() {} }, clock }); // prettier-ignore
+  sim.setSpiceLite({ enabled: true, bounce });
+  const cap = capture();
+  sim.start();
+  clock.advance(20);
+  const from = cap.ticks.length;
+  window.dispatchEvent(new CustomEvent("chiphippo:part-state", { detail: { id: "s1", ref: "sw-push", state: { pressed: true } } })); // prettier-ignore
+  // Past the bounce, and past the next frame's publish.
+  clock.advance(100);
+  const levels = cap.ticks.slice(from).map((t) => t.netLevels.get(t.netlist.netOfPoint.get(b.at(u.get(1))))); // prettier-ignore
+  const own = cap.ticks.slice(from).filter((t) => t.ownNetlist).length;
+  const end = cap.states.at(-1);
+  sim.stop();
+  cap.stop();
+  return { levels, own, end, at: b.at(u.get(1)) };
+}
+
+const changes = (levels) =>
+  levels.reduce((n, lv, i) => (i && lv !== levels[i - 1] ? n + 1 : n), 0);
+
+test("Switch bounce: a pressed button chatters, then rests closed", () => {
+  const { levels, own, end, at } = pressButton({ bounce: true });
+  assert.ok(own >= 3, `ticks on a bounce's netlist: ${own}`);
+  assert.ok(changes(levels) >= 4, `it chattered: ${levels.join("")}`);
+  assert.equal(levels.at(-1), "L", "and rests LOW");
+  assert.equal(end.netLevels.get(end.netlist.netOfPoint.get(at)), "L");
+  assert.equal(end.ownNetlist, false, "settled: the desk's own netlist");
+});
+
+test("Switch bounce off: the button closes once", () => {
+  const { levels, own } = pressButton({ bounce: false });
+  assert.equal(own, 0);
+  assert.equal(changes(levels.filter((lv) => lv === "H" || lv === "L")), 0);
+  assert.equal(levels.at(-1), "L");
+});
+
+test("Switch bounce: a slide switch's old throw never re-makes as its new one bounces", () => {
+  resetDom();
+  const clock = drivenClock();
+  const b = bench();
+  const u = b.seat("u1", "74LS04", "e10");
+  b.vcc(u.get(14));
+  b.gnd(u.get(7));
+  // Common into the input, pulled up through 10 kΩ; throw 1 to ground,
+  // throw 2 to +5 V. Thrown 1 → 2, the input goes LOW → HIGH once: in every
+  // gap the common floats up through its pull-up, never back to ground.
+  const s = b.seat("s1", "sw-slide", "a40", { pos: "1" });
+  b.gnd(s.get(1));
+  b.vcc(s.get(3));
+  const up = b.seat("r1", "resistor", "a30", { ohms: 10e3 });
+  b.vcc(up.get(1));
+  b.link(up.get(2), s.get(2));
+  b.link(s.get(2), u.get(1));
+  const desk = fakeDoc(b.doc);
+  const sim = new SimController({ deskDoc: desk, notifications: { notify() {}, dismiss() {} }, clock }); // prettier-ignore
+  sim.setSpiceLite({ enabled: true, bounce: true });
+  const cap = capture();
+  sim.start();
+  clock.advance(20);
+  const from = cap.ticks.length;
+  desk.setComponentParams("s1", { pos: "2" });
+  window.dispatchEvent(new CustomEvent("chiphippo:doc-changed"));
+  clock.advance(20);
+  const after = cap.ticks.slice(from);
+  const level = (t) =>
+    t.netLevels.get(t.netlist.netOfPoint.get(b.at(u.get(1))));
+  assert.ok(after.filter((t) => t.ownNetlist).length >= 3, "it bounced");
+  assert.ok(
+    after.every((t) => level(t) === "H"),
+    after.map(level).join(""),
+  );
+  // A bounce's netlist names its own nets: the common is cut off both throws.
+  const gap = after.find((t) => t.ownNetlist);
+  const base = buildNetlist(desk.toJSON());
+  assert.notEqual(gap.netlist, base);
+  sim.stop();
+  cap.stop();
+});

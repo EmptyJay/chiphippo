@@ -1,0 +1,144 @@
+{
+  "area": "ls-stage",
+  "title": "74LS input and output stages",
+  "ngspice": "ngspice-44.2",
+  "cases": {
+    "ls-high-100k": {
+      "reference": "device",
+      "values": {
+        "out/V": 4.176978
+      }
+    },
+    "ls-high-10k": {
+      "reference": "device",
+      "values": {
+        "out/V": 3.628586
+      }
+    },
+    "ls-high-2k2": {
+      "reference": "device",
+      "values": {
+        "out/V": 3.560017
+      }
+    },
+    "ls-low-10k": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.2240964
+      }
+    },
+    "ls-low-1k": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.3021968
+      }
+    },
+    "ls-low-470": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.3663645
+      }
+    },
+    "ls-source-led-330": {
+      "reference": "device",
+      "values": {
+        "out/V": 3.359566,
+        "d1/A": 0.004702694
+      }
+    },
+    "ls-source-led-1k": {
+      "reference": "device",
+      "values": {
+        "out/V": 3.5538,
+        "d1/A": 0.001834598
+      }
+    },
+    "ls-sink-led-330": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.3488561,
+        "d1/A": 0.008409494
+      }
+    },
+    "ls-sink-led-1k": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.2769988,
+        "d1/A": 0.002961152
+      }
+    },
+    "ls-low-220-4.75v": {
+      "reference": "device",
+      "values": {
+        "out/V": 1.060199
+      }
+    },
+    "ls-high-2k2-4.75v": {
+      "reference": "device",
+      "values": {
+        "out/V": 3.313456
+      }
+    },
+    "ls-low-220-5v": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.9326991
+      }
+    },
+    "ls-high-2k2-5v": {
+      "reference": "device",
+      "values": {
+        "out/V": 3.560017
+      }
+    },
+    "ls-low-220-5.25v": {
+      "reference": "device",
+      "values": {
+        "out/V": 0.803132
+      }
+    },
+    "ls-high-2k2-5.25v": {
+      "reference": "device",
+      "values": {
+        "out/V": 3.806734
+      }
+    },
+    "ls-input-pulldown-1k": {
+      "reference": "device",
+      "values": {
+        "in/V": 0.2104858
+      }
+    },
+    "ls-input-pulldown-470": {
+      "reference": "device",
+      "values": {
+        "in/V": 0.103737
+      }
+    },
+    "ls-rc-10k-1u": {
+      "reference": "device",
+      "values": {
+        "cap@0.002/V": 0.658776343,
+        "cap@0.005/V": 1.43413755,
+        "cap@0.01/V": 2.3244574,
+        "cap@0.02/V": 3.34113387,
+        "cap@0.05/V": 4.24714624
+      }
+    },
+    "ls-chain": {
+      "reference": "device",
+      "values": {
+        "y1/V": 4.509323,
+        "y2/V": 0.214158,
+        "y3/V": 4.099614
+      }
+    },
+    "ls-nand-chain": {
+      "reference": "device",
+      "values": {
+        "y1/V": 0.214158,
+        "y2/V": 4.099614
+      }
+    }
+  }
+}

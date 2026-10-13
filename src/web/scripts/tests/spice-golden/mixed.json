@@ -1,0 +1,50 @@
+{
+  "area": "mixed",
+  "title": "Mixed circuits",
+  "ngspice": "ngspice-44.2",
+  "cases": {
+    "mixed-cmos-osc-ls-load": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.083232,
+        "high/s": 0.0390867701,
+        "low/s": 0.0441452299
+      }
+    },
+    "mixed-ls-rc-schmitt-coil": {
+      "reference": "device",
+      "values": {
+        "cap@0.002/V": 0.658776546,
+        "cap@0.005/V": 1.43413748,
+        "cap@0.01/V": 2.32445704,
+        "cap@0.013/V": 2.70698049,
+        "cap@0.022/V": 3.4726737,
+        "cap@0.03/V": 3.85076524,
+        "collector@0.002/V": 0.141939488,
+        "collector@0.005/V": 0.154321458,
+        "collector@0.01/V": 0.155000518,
+        "collector@0.013/V": 0.155005408,
+        "collector@0.022/V": 5,
+        "collector@0.03/V": 5
+      }
+    },
+    "mixed-ls-rc-schmitt-coil-current": {
+      "reference": "device",
+      "values": {
+        "l1@0.001/A": 0.0315544609,
+        "l1@0.002/A": 0.0433834433,
+        "l1@0.005/A": 0.0501361092,
+        "l1@0.01/A": 0.0505135353,
+        "l1@0.013/A": 0.0505162558
+      }
+    },
+    "mixed-ls-rc-ring": {
+      "reference": "device",
+      "values": {
+        "period/s": 0.0123530372,
+        "high/s": 0.00769730438,
+        "low/s": 0.00465573282
+      }
+    }
+  }
+}
