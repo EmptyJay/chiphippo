@@ -201,15 +201,45 @@ test("a hidden schematic remembers the live levels and paints them when shown", 
     netlist: { get: () => twoChipNetlist() },
   });
   const edge = () => viewport.querySelector('.schematic-edge[data-nets="n1"]');
-  const before = edge().dataset.level;
+  // Hidden, it is not even drawn: the diagram is laid out when first shown.
+  assert.equal(edge(), null, "nothing drawn while hidden");
   window.dispatchEvent(
     new CustomEvent("chiphippo:sim-state", {
       detail: { running: true, netLevels: new Map([["n1", "L"]]), chipStatus: new Map() }, // prettier-ignore
     }),
   );
-  assert.equal(edge().dataset.level, before, "nothing painted while hidden");
+  window.dispatchEvent(
+    new CustomEvent("chiphippo:net-probed", { detail: { netId: "n1" } }),
+  );
   view.setVisible(true);
   assert.equal(edge().dataset.level, "L", "the last board, painted on show");
+  assert.ok(edge().classList.contains("schematic--highlight"), "and the probed net"); // prettier-ignore
+  view.dispose();
+});
+
+test("a hidden schematic lays nothing out on an edit, and catches up on show", () => {
+  resetDom();
+  const viewport = document.createElement("div");
+  viewport.hidden = true;
+  document.body.append(viewport);
+  const doc = { toJSON: () => twoChipDoc() };
+  let built = 0;
+  const view = new SchematicView(viewport, {
+    doc,
+    onSetSchematicPos() {},
+    netlist: { get: () => (built++, twoChipNetlist()) },
+  });
+  for (let i = 0; i < 5; i++) {
+    window.dispatchEvent(new CustomEvent("chiphippo:doc-changed"));
+  }
+  assert.equal(built, 0, "no layout while hidden");
+  view.setVisible(true);
+  assert.equal(built, 1, "one, on show");
+  window.dispatchEvent(new CustomEvent("chiphippo:doc-changed"));
+  assert.equal(built, 2, "shown, an edit redraws");
+  view.setVisible(false);
+  view.setVisible(true);
+  assert.equal(built, 2, "shown again with nothing changed: no redraw");
   view.dispose();
 });
 

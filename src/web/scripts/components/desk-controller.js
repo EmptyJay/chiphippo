@@ -148,6 +148,31 @@ function switchIndexFromEvent(e) {
 /** Pointer travel (px) below which a press stays a click, not a drag/pan. */
 const DRAG_THRESHOLD = 4;
 
+/** Put `elements` (one parent's children; nulls skipped) in this order
+    after the first of them, moving only those out of place — and nothing
+    else in the parent (a placement ghost keeps its place). */
+function inDocumentOrder(elements) {
+  let prev = null;
+  for (const el of elements) {
+    if (!el?.parentNode) continue;
+    if (prev && prev.nextSibling !== el) {
+      prev.parentNode.insertBefore(el, prev.nextSibling);
+    }
+    prev = el;
+  }
+}
+
+/** Whether a key press is an EDIT of the desk (refused while running, and
+    told so): Delete/Backspace, the bare tool and part keys (W B R F), and
+    paste, cut and duplicate. Every other key is nobody's business here. */
+function isEditKey(e) {
+  if (e.key === "Delete" || e.key === "Backspace") return true;
+  const k = e.key?.toLowerCase();
+  const accel = (e.metaKey || e.ctrlKey) && !e.altKey;
+  if (accel) return k === "v" || k === "x" || k === "d";
+  return !e.altKey && "wbrf".includes(k ?? "-") && k?.length === 1;
+}
+
 /** The drags the part/brick pointer handlers own — ONE list for the move and
     the release, which used to carry a copy each. */
 const PART_DRAG_KINDS = new Set([
@@ -281,6 +306,7 @@ export class DeskController {
   // Simulation (Feature 90): editing is locked while running; live net levels
   // arrive over chiphippo:sim-state and drive LEDs / chip badges / probe tint.
   #editingLocked = false;
+  #onEditRefused; // an edit was tried while the run holds the desk
   /** An edit the run allowed was made since Run (see RUN_VOLATILE_LABELS). */
   #editedWhileRunning = false;
   /** The document as it stood at Run, while running. */
@@ -392,6 +418,7 @@ export class DeskController {
     onProbeStateChange,
     onWireFadeChange,
     onAddNetToAnalyzer,
+    onEditRefused,
     onClockToggle,
     onClockPause,
     onOpenPinout,
@@ -419,6 +446,7 @@ export class DeskController {
     this.#deskView = deskView;
     this.#doc = deskDoc;
     this.#onAddNetToAnalyzer = onAddNetToAnalyzer;
+    this.#onEditRefused = onEditRefused;
     this.#onClockToggle = onClockToggle;
     this.#onClockPause = onClockPause;
     this.#onOpenPinout = onOpenPinout;
@@ -528,6 +556,7 @@ export class DeskController {
         get editingLocked() {
           return sel.#editingLocked;
         },
+        refuseEdit: () => sel.#refuseEdit(),
         get selection() {
           return sel.#sel;
         },
@@ -700,6 +729,7 @@ export class DeskController {
       get editingLocked() {
         return self.#editingLocked;
       },
+      refuseEdit: () => self.#refuseEdit(),
       get probeArmed() {
         return self.#probe.armed;
       },
@@ -741,6 +771,7 @@ export class DeskController {
       get editingLocked() {
         return self.#editingLocked;
       },
+      refuseEdit: () => self.#refuseEdit(),
       get probeArmed() {
         return self.#probe.armed;
       },
@@ -1522,6 +1553,12 @@ export class DeskController {
 
   get wireToolArmed() {
     return this.#wire.armed;
+  }
+
+  /** A wire or bus is half laid: its first end placed, its second not yet —
+      what Space must not run the circuit over (Run would throw it away). */
+  get layingInProgress() {
+    return this.#wire.pending || this.#bus.pending;
   }
 
   /** The color the next committed wire gets. */
@@ -2890,7 +2927,10 @@ export class DeskController {
       this.toggleWiresFaded();
       return true;
     }
-    if (this.#editingLocked) return false;
+    if (this.#editingLocked) {
+      if (isEditKey(e)) this.#refuseEdit();
+      return false;
+    }
     // A live pointer drag owns #mode until its pointerup commits + tears it
     // down. W/B arm a tool, paste arms a ghost, and Delete removes the dragged
     // item — each would overwrite #mode (or the view) out from under that
@@ -3105,7 +3145,12 @@ export class DeskController {
     if (e.button !== 0) return; // middle = pan (DeskView), right = menu
     // Shift alone is the viewport's marquee; with Option it selects a chain.
     if (e.shiftKey && !e.altKey) return;
-    // No board drags while probing or running (topology frozen).
+    // No board drags while probing or running (topology frozen) — and a
+    // drag tried while running is told why.
+    if (this.#editingLocked && !this.#mode && !this.#probe.armed) {
+      this.#refuseDragFrom(e);
+      return;
+    }
     if (this.#mode || this.#probe.armed || this.#editingLocked) return;
     // A wire's end cap sits directly ON a board hole, so a press there lands on
     // the board SVG (caps aren't pointer targets) and this handler runs before
@@ -3307,6 +3352,7 @@ export class DeskController {
   #onBoardContextMenu(id, e) {
     e.preventDefault();
     if (this.#probe.armed) return; // right-click names the net (viewport handler)
+    if (this.#editingLocked) this.#refuseEdit();
     if (this.#mode || this.#editingLocked) return; // no board edits while running
     this.selectBoard(id);
     PopupManager.menu({
@@ -3459,6 +3505,9 @@ export class DeskController {
       } else if (comp?.kind === "clock" && comp.params?.hz === "manual") {
         e.stopPropagation();
         this.#onClockToggle?.(id);
+      } else {
+        // Anything else is frozen: a drag of it is told why.
+        this.#refuseDragFrom(e);
       }
       return;
     }
@@ -5319,6 +5368,35 @@ export class DeskController {
    * @param {string} [label] - a short verb for the edit ("move board", …).
    * @param {{coalesce?: boolean}} [opts]
    */
+  /** An edit was tried while the run holds the desk: say why, and how to
+      get it back (app.js shows one toast, its key collapsing repeats). Every
+      refusal used to be silent — the press, the key, the ⌘Z just did
+      nothing. */
+  #refuseEdit() {
+    this.#onEditRefused?.();
+  }
+
+  /** A press on something frozen while running: refused as an edit only if
+      it becomes a DRAG (past the usual threshold) — a plain click stays a
+      look, and says nothing. */
+  #refuseDragFrom(e) {
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const move = (ev) => {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < DRAG_THRESHOLD) return; // prettier-ignore
+      done();
+      this.#refuseEdit();
+    };
+    const done = () => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", done, true);
+      window.removeEventListener("pointercancel", done, true);
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", done, true);
+    window.addEventListener("pointercancel", done, true);
+  }
+
   #emitDocChanged(label = "edit", opts = {}) {
     // Boards may have moved, been torn out of a group, or been deleted —
     // re-trace the highlighter before anyone renders from the new document.
@@ -5386,7 +5464,10 @@ export class DeskController {
 
   /** Restore the previous snapshot. @returns {boolean} true when it acted. */
   undo() {
-    if (this.#editingLocked) return false; // history frozen during a run
+    if (this.#editingLocked) {
+      this.#refuseEdit(); // history frozen during a run
+      return false;
+    }
     // Nor mid-drag: the menu's ⌘Z reaches here while a gesture is live, and
     // the document it would restore may not hold what the drag is holding.
     if (this.#dragGestureActive) return false;
@@ -5398,7 +5479,10 @@ export class DeskController {
 
   /** Restore the next snapshot. @returns {boolean} true when it acted. */
   redo() {
-    if (this.#editingLocked) return false;
+    if (this.#editingLocked) {
+      this.#refuseEdit();
+      return false;
+    }
     if (this.#dragGestureActive) return false;
     const snapshot = this.#history.redo();
     if (snapshot == null) return false;
@@ -5435,6 +5519,7 @@ export class DeskController {
     this.disarmBusTool();
     this.disarmProbe();
     this.#restoring = true; // a load is not an edit — never record it
+    const loadedFrom = this.#doc.toJSON();
     try {
       this.#doc.load(raw);
       // Another document's chips: its inspectors are closing with it.
@@ -5442,7 +5527,10 @@ export class DeskController {
       this.#adoptUnbackedMemories();
       if (history) this.#history = history;
       if (this.#history.size === 0) this.#history.clear(this.#doc.snapshot());
-      this.#rebuildScene();
+      // Another document: its BOARDS may be the very strips already shown (a
+      // kit where every desktop has one), and those are kept; its parts are
+      // all mounted afresh — they belong to another circuit.
+      this.#rebuildScene({ shown: loadedFrom });
       // A different DOCUMENT, not an edit of this one: whatever was keyed by
       // component id (the chip debugger's arming) belongs to the last one.
       window.dispatchEvent(new CustomEvent("chiphippo:desk-loaded"));
@@ -5464,8 +5552,11 @@ export class DeskController {
     if (this.#dragGestureActive) this.#cancelDragGesture();
     this.#restoring = true;
     try {
+      // What the views show now — the document they were mounted from and
+      // kept in step with — so the restore remounts only what it changes.
+      const shown = this.#doc.toJSON();
       this.#doc.restore(snapshot);
-      this.#rebuildScene();
+      this.#rebuildScene({ shown, parts: true });
       // Announce so autosave, the title/dirty marker, the sim, and the probe
       // all reconcile — but not through the recording seam. `replaced`: the
       // whole document was swapped, which a gesture elsewhere (the schematic's
@@ -5478,11 +5569,19 @@ export class DeskController {
   }
 
   /**
-   * Tear down every mounted view and remount the whole scene from the current
-   * document — the reusable full-rebuild path (undo/redo restore). Selection is
-   * dropped; wires and the board outline re-render from the shared DeskDoc.
+   * Bring every mounted view in line with the current document — undo/redo,
+   * a desktop switch, New/Open. Selection is dropped; wires and the board
+   * outline re-render from the shared DeskDoc.
+   *
+   * Given `shown` (the document the views were showing), a board whose data
+   * is unchanged keeps its view, and with `parts` so does every part whose
+   * data is unchanged ON boards that are unchanged — a one-wire undo remounts
+   * nothing. Remounting every strip (hundreds of nodes each) and every part
+   * on every ⌘Z was most of an undo's cost on a big desk. Without `shown`,
+   * everything is torn down and mounted afresh.
+   * @param {{shown?: object, parts?: boolean}} [opts]
    */
-  #rebuildScene() {
+  #rebuildScene({ shown = null, parts = false } = {}) {
     // A drag in flight must die HERE, before its views do. The gesture's
     // listeners live on `window` (see pointer-gesture.js), so unlike the old
     // element-scoped ones they SURVIVE the unmount below — a release arriving
@@ -5492,15 +5591,41 @@ export class DeskController {
     // Drop all selection state first (the views it points at are about to go).
     this.#sel.forgetAll();
     this.#hideHover();
-    // Unmount every board and part view (keep the Map objects — collaborators
-    // hold references to them).
-    for (const view of this.#views.values()) view.remove();
-    this.#views.clear();
-    for (const view of this.#partViews.values()) view.remove();
-    this.#partViews.clear();
-    // Remount from the restored document.
-    for (const board of this.#doc.boards) this.#mountBoard(board);
-    for (const component of this.#doc.components) this.#mountPart(component);
+    // Unmount every view the document no longer describes as shown (keep
+    // the Map objects — collaborators hold references to them).
+    const key = (x) => JSON.stringify(x);
+    const wasBoard = new Map((shown?.boards ?? []).map((b) => [b.id, key(b)]));
+    const wasPart = new Map((shown?.components ?? []).map((c) => [c.id, key(c)])); // prettier-ignore
+    const boards = this.#doc.boards;
+    const components = this.#doc.components;
+    const boardKeys = new Map(boards.map((b) => [b.id, key(b)]));
+    // A part is drawn against the strips under it (a bent lead resolves
+    // against whatever lies there), so a part is kept only while EVERY board
+    // is as it was.
+    const boardsSame =
+      wasBoard.size === boardKeys.size &&
+      [...boardKeys].every(([id, k]) => wasBoard.get(id) === k);
+    const partKeys = new Map(components.map((c) => [c.id, key(c)]));
+    for (const [id, view] of this.#views) {
+      if (wasBoard.get(id) === boardKeys.get(id)) continue;
+      view.remove();
+      this.#views.delete(id);
+    }
+    for (const [id, view] of this.#partViews) {
+      if (parts && boardsSame && wasPart.get(id) === partKeys.get(id)) continue;
+      view.remove();
+      this.#partViews.delete(id);
+    }
+    // Mount what is missing, then put every view in document order (a
+    // remounted one was appended last; a fresh rebuild is in order already).
+    for (const board of boards) {
+      if (!this.#views.has(board.id)) this.#mountBoard(board);
+    }
+    for (const component of components) {
+      if (!this.#partViews.has(component.id)) this.#mountPart(component);
+    }
+    inDocumentOrder(boards.map((b) => this.#views.get(b.id)?.element));
+    inDocumentOrder(components.map((c) => this.#partViews.get(c.id)?.element));
     this.#wireLayer.render();
     this.#sel.refreshBoardOutline();
   }

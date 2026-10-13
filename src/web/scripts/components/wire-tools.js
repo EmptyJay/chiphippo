@@ -92,6 +92,11 @@ export class WireTools {
     return this.#host.mode?.kind === "wire";
   }
 
+  /** Armed with a wire's first end already laid (the rubber band out). */
+  get pending() {
+    return this.armed && this.#host.mode.from != null;
+  }
+
   /** The color the next committed wire gets. */
   get color() {
     return WIRE_COLORS[this.#colorIndex];
@@ -275,6 +280,7 @@ export class WireTools {
     // open, and since PopupManager QUEUES the second rather than replacing it,
     // the wire menu is what the user sees first, with the net menu behind it.
     if (this.#host.probeArmed) return;
+    if (this.#host.editingLocked) this.#host.refuseEdit?.();
     if (this.#host.mode || this.#host.editingLocked) return; // frozen while running
     this.#host.selectWire(id);
     PopupManager.menu({

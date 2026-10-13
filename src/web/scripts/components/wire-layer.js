@@ -65,7 +65,7 @@
 // changes (chiphippo:doc-changed) or an endpoint's board moves (the
 // controller passes live drag positions via `overrides`) — never on pan/zoom.
 
-import { clear, svgEl } from "../dom.js";
+import { svgEl } from "../dom.js";
 import { PX_PER_UNIT } from "../desk/desk-geometry.js";
 import {
   FADE_SOLID_FRACTION,
@@ -109,11 +109,36 @@ const FADE_GRADIENT_ID = "wire-fade-falloff";
 /** Straight-line distance between two world-px points. */
 const distance = (p, q) => Math.hypot(q.x - p.x, q.y - p.y);
 
+/** Do two drag specs (plain data: ids, flags, {x, y} points) say the same
+    thing? Null is the same as null and nothing else. */
+function sameSpec(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Do two sets hold exactly the same members? */
 function sameSet(a, b) {
   if (a.size !== b.size) return false;
   for (const v of a) if (!b.has(v)) return false;
   return true;
+}
+
+/**
+ * A wire's DRAWING key: everything its group's paths, caps and knobs are
+ * built from — colour, both ends, its ribbon collars, its routed points (and
+ * which knob is live), and whether it is faded. Two renders with the same key
+ * draw the same group, so the second keeps the first's.
+ */
+function wireKey(color, a, b, collars, route, faded) {
+  const p = (q) => `${q.x},${q.y}`;
+  let key = `${color}|${p(a)}|${p(b)}|${faded ? 1 : 0}`;
+  if (collars) key += `|c${p(collars.collarA)}|${p(collars.collarB)}`;
+  if (route) {
+    key += `|r${route.active}${route.merging ? "m" : ""}`;
+    for (const q of route.points) key += `|${p(q)}`;
+  }
+  return key;
 }
 
 export class WireLayer {
@@ -135,6 +160,13 @@ export class WireLayer {
   #busDrag = null; // { busId, memberIds:Set, end:"from"|"to"|null, dx, dy (px), legal } dragging a bus (or one end of it)
   #partDrag = null; // { shifts: Map<wireId, {from?, to? (ADDRESS), points?:{dx,dy}}>, legal } — wires riding a part drag
   #dragShift = []; // [{ el, illegal }] a RIGID bus drag translates — see setBusDrag
+  // Each wire's drawn group, KEPT between renders (wireId → {key, group,
+  // fadeEnds}): a render redraws only the wires whose geometry changed and
+  // re-orders the rest. Rebuilding every wire — a group, three paths, two
+  // caps and four listeners each — on every pointermove of a board, brick,
+  // wire-end or Option-drag was the desk's dominant per-move cost on a busy
+  // desk, and on a slower machine the reason a drag fell behind the cursor.
+  #drawn = new Map();
 
   /**
    * @param {HTMLElement} layer - the `.layer-wires` element.
@@ -164,6 +196,7 @@ export class WireLayer {
     // element a token 1×1 box and let CSS overflow:visible paint the wires.
     this.#svg = svgEl("svg", { class: "wire-svg", width: 1, height: 1 });
     layer.append(this.#svg);
+    this.#listen();
 
     // The wire list lives in the document; re-render on every announced
     // change (add/remove/recolor, board moves committed, cascades).
@@ -173,6 +206,38 @@ export class WireLayer {
 
   get element() {
     return this.#svg;
+  }
+
+  /**
+   * The wires' and bands' pointer events, DELEGATED from the one svg: a kept
+   * group needs no listeners re-attached, and a redrawn one none attached at
+   * all. `pointerover`/`pointerout` stand in for each group's own
+   * enter/leave — they bubble, and a move between two parts of one group
+   * (its hit stroke, its cap) is no enter or leave of it.
+   */
+  #listen() {
+    const wireOf = (node) => node?.closest?.("g.wire[data-wire-id]") ?? null;
+    const bandOf = (node) => node?.closest?.(".bus-band[data-bus-id]") ?? null;
+    this.#svg.addEventListener("click", (e) => {
+      const g = wireOf(e.target);
+      if (g) return this.#onSelect?.(g.dataset.wireId, e);
+      const band = bandOf(e.target);
+      if (band) this.#onSelectBus?.(band.dataset.busId, e);
+    });
+    this.#svg.addEventListener("contextmenu", (e) => {
+      const g = wireOf(e.target);
+      if (g) return this.#onContextMenu?.(g.dataset.wireId, e);
+      const band = bandOf(e.target);
+      if (band) this.#onBusContextMenu?.(band.dataset.busId, e);
+    });
+    this.#svg.addEventListener("pointerover", (e) => {
+      const g = wireOf(e.target);
+      if (g && !g.contains(e.relatedTarget)) this.#onHover?.(g.dataset.wireId);
+    });
+    this.#svg.addEventListener("pointerout", (e) => {
+      const g = wireOf(e.target);
+      if (g && !g.contains(e.relatedTarget)) this.#onHover?.(null);
+    });
   }
 
   /**
@@ -246,11 +311,16 @@ export class WireLayer {
     // active) still reads the real spec.
     const rigidBus = Boolean(busDrag && !busDrag.end);
     const busOffset = rigidBus ? null : busDrag;
-    clear(this.#svg);
     this.#dragShift = [];
     // The fade masks (one per faded wire) live in a <defs> made on demand —
     // nothing to carry when the toggle is off, which is the usual case.
     let defs = null;
+    // What the svg is to hold, in paint order (#sync puts it there, moving
+    // as little as it can): the ribbons' hit bands, the wires, the ribbon
+    // bodies, the raised (selected) wires, the end handles, the previews.
+    const bandHits = [];
+    const lowered = [];
+    const drawn = new Map();
 
     // Snapshot the doc arrays ONCE — the getters copy on every access.
     const wires = this.#doc.wires;
@@ -321,7 +391,7 @@ export class WireLayer {
         { el: bandCover, illegal: "bus-band--illegal" },
         ...handles.map((el) => ({ el, illegal: null })),
       );
-      this.#svg.append(bandHit);
+      bandHits.push(bandHit);
       bandCovers.push(bandCover);
       endHandles.push(...handles);
     }
@@ -357,9 +427,6 @@ export class WireLayer {
       // middle, so only the last stretch into each hole needs its own path.
       const collars = wireCollars.get(wire.id);
       const selected = this.#selectedIds.has(wire.id);
-      const leads =
-        collars &&
-        `${wirePath(collars.collarA, a)} ${wirePath(collars.collarB, b)}`;
       // A ROUTED wire is the straight run through its own waypoints (plus the
       // one being dragged, live) instead of the sagging curve. A BUS MEMBER is
       // never routed however it is set: its middle belongs to the ribbon, so
@@ -374,31 +441,98 @@ export class WireLayer {
       // had, so it still points at the ribbon; every other wire is cut back to
       // a stub off each end. Either way a mask fades each end out over a circle
       // around its own hole, sized to how much wire runs off that end.
-      let d =
-        leads ||
-        (route
-          ? filletedPolylinePath(route.points, BEND_RADIUS_PX)
-          : wirePath(a, b));
-      let fadeEnds = null;
-      if (this.#faded && !selected) {
-        if (collars) {
-          fadeEnds = [
-            { ...a, r: fadeRadius(distance(a, collars.collarA)) },
-            { ...b, r: fadeRadius(distance(b, collars.collarB)) },
-          ];
-        } else {
-          const fade = route
-            ? fadedPolyline(route.points, BEND_RADIUS_PX)
-            : fadedWire(a, b);
-          d = fade.d;
-          fadeEnds = [
-            { ...a, r: fade.radius },
-            { ...b, r: fade.radius },
-          ];
+      // A wire both of whose ends (and every bend) ride ONE translation —
+      // its board, or both its boards, dragged together — draws as its
+      // resting picture moved by a transform: the group drawn at rest is kept
+      // and only shifted. (A board drag moves every wire on the strips it
+      // carries; redrawn each pointermove, a big kit's drag ran at a few
+      // frames a second.)
+      let shift = null;
+      let ga = a;
+      let gb = b;
+      let groute = route;
+      if (
+        overrides &&
+        !draggingEnd &&
+        !draggingWhole &&
+        !draggingBus &&
+        !ridingPart &&
+        !collars
+      ) {
+        // prettier-ignore
+        const rest = this.#wireEnds(wire, null);
+        if (rest.a && rest.b) {
+          const tx = a.x - rest.a.x;
+          const ty = a.y - rest.a.y;
+          const moved = (p, q) => Math.abs(p.x - q.x - tx) < 1e-6 && Math.abs(p.y - q.y - ty) < 1e-6; // prettier-ignore
+          if ((tx || ty) && moved(b, rest.b)) {
+            const restRoute = route ? this.#routeGeometry(wire, rest.a, rest.b, null) : null; // prettier-ignore
+            if (
+              !route ||
+              route.points.every((p, i) => moved(p, restRoute.points[i]))
+            ) {
+              // prettier-ignore
+              shift = `translate(${tx} ${ty})`;
+              ga = rest.a;
+              gb = rest.b;
+              groute = restRoute;
+            }
+          }
         }
       }
-
-      const group = svgEl("g", { class: "wire" });
+      const faded = this.#faded && !selected;
+      // Everything the group's DRAWING depends on. The same as last render:
+      // the very group drawn then is kept, untouched.
+      const key = wireKey(wire.color, ga, gb, collars, groute, faded);
+      let entry = this.#drawn.get(wire.id);
+      if (entry?.key !== key) {
+        const leads =
+          collars &&
+          `${wirePath(collars.collarA, ga)} ${wirePath(collars.collarB, gb)}`;
+        let d =
+          leads ||
+          (groute
+            ? filletedPolylinePath(groute.points, BEND_RADIUS_PX)
+            : wirePath(ga, gb));
+        let fadeEnds = null;
+        if (faded) {
+          if (collars) {
+            fadeEnds = [
+              { ...ga, r: fadeRadius(distance(ga, collars.collarA)) },
+              { ...gb, r: fadeRadius(distance(gb, collars.collarB)) },
+            ];
+          } else {
+            const fade = groute
+              ? fadedPolyline(groute.points, BEND_RADIUS_PX)
+              : fadedWire(ga, gb);
+            d = fade.d;
+            fadeEnds = [
+              { ...ga, r: fade.radius },
+              { ...gb, r: fade.radius },
+            ];
+          }
+        }
+        const group = svgEl("g", { class: "wire" });
+        group.dataset.wireId = wire.id;
+        group.style.setProperty(
+          "--wire-color",
+          `var(--color-wire-${wire.color})`,
+        );
+        group.append(
+          svgEl("path", { class: "wire-hit", d }),
+          svgEl("path", { class: "wire-outline", d }),
+          svgEl("path", { class: "wire-core", d }),
+          svgEl("circle", { class: "wire-cap", cx: ga.x, cy: ga.y, r: CAP_RADIUS }), // prettier-ignore
+          svgEl("circle", { class: "wire-cap", cx: gb.x, cy: gb.y, r: CAP_RADIUS }), // prettier-ignore
+        );
+        if (groute) {
+          group.classList.add("wire--routed");
+          group.append(...this.#buildRoutePoints(groute));
+        }
+        entry = { key, group, fadeEnds };
+      }
+      drawn.set(wire.id, entry);
+      const { group, fadeEnds } = entry;
       if (fadeEnds) {
         defs ??= this.#fadeDefs();
         group.setAttribute(
@@ -406,65 +540,77 @@ export class WireLayer {
           `url(#${this.#appendFadeMask(defs, wire.id, fadeEnds)})`,
         );
       }
-      group.dataset.wireId = wire.id;
-      group.style.setProperty(
-        "--wire-color",
-        `var(--color-wire-${wire.color})`,
-      );
-      group.append(
-        svgEl("path", { class: "wire-hit", d }),
-        svgEl("path", { class: "wire-outline", d }),
-        svgEl("path", { class: "wire-core", d }),
-        svgEl("circle", { class: "wire-cap", cx: a.x, cy: a.y, r: CAP_RADIUS }),
-        svgEl("circle", { class: "wire-cap", cx: b.x, cy: b.y, r: CAP_RADIUS }),
-      );
-      if (route) {
-        group.classList.add("wire--routed");
-        group.append(...this.#buildRoutePoints(route));
-      }
       // While dragging (one end or the whole wire), mute the hit stroke
       // (pointer is captured) and tint the wire red over an illegal drop,
-      // mirroring the rubber band.
-      if (
-        draggingEnd ||
-        draggingWhole ||
-        draggingBus ||
-        ridingPart ||
-        route?.dragging
-      ) {
-        group.classList.add("wire--dragging");
-        // A waypoint drag has no legality to show: a bend lands wherever it is
-        // let go (it is not a connection), so it never tints.
-        const legal = draggingEnd
+      // mirroring the rubber band. (Set on a kept group every render: these
+      // are a drag's STATE, not its drawing.)
+      const dragging = Boolean(
+        draggingEnd || draggingWhole || draggingBus || ridingPart || route?.dragging, // prettier-ignore
+      );
+      // A waypoint drag has no legality to show: a bend lands wherever it is
+      // let go (it is not a connection), so it never tints.
+      const legal = !dragging
+        ? true
+        : draggingEnd
           ? drag.legal
           : draggingWhole
             ? whole.legal
             : ridingPart
               ? this.#partDrag.legal
               : (busDrag?.legal ?? true);
-        group.classList.toggle("wire-preview--illegal", legal === false);
-      }
+      group.classList.toggle("wire--dragging", dragging);
+      group.classList.toggle("wire-preview--illegal", legal === false);
       group.classList.toggle("wire--selected", selected);
-      group.addEventListener("click", (e) => this.#onSelect?.(wire.id, e));
-      group.addEventListener("contextmenu", (e) =>
-        this.#onContextMenu?.(wire.id, e),
-      );
-      group.addEventListener("pointerenter", () => this.#onHover?.(wire.id));
-      group.addEventListener("pointerleave", () => this.#onHover?.(null));
       if (draggingBus && rigidBus) {
         this.#dragShift.push({ el: group, illegal: "wire-preview--illegal" });
+      } else if (shift) {
+        group.setAttribute("transform", shift);
+      } else if (group.hasAttribute("transform")) {
+        group.removeAttribute("transform"); // a rigid drag's, now over
       }
       // A HIGHLIGHTED wire is held back and re-appended over everything else
       // (pass 4 above); every other wire keeps its document-order slot.
       if (selected) raised.push(group);
-      else this.#svg.append(group);
+      else lowered.push(group);
     }
-    for (const cover of bandCovers) this.#svg.append(cover);
-    for (const group of raised) this.#svg.append(group);
-    for (const handle of endHandles) this.#svg.append(handle);
-    if (busPreview) this.#svg.append(busPreview);
-    if (preview) this.#svg.append(preview);
+    this.#drawn = drawn;
+    this.#sync([
+      defs,
+      ...bandHits,
+      ...lowered,
+      ...bandCovers,
+      ...raised,
+      ...endHandles,
+      busPreview,
+      preview,
+    ]);
     if (rigidBus) this.#applyDragShift(busDrag);
+  }
+
+  /**
+   * Make the svg hold exactly `nodes` (nulls skipped), in that order, moving
+   * only what is out of place: a render that changed one wire moves nothing
+   * else, and a selection lifts one group rather than redrawing them all.
+   */
+  #sync(nodes) {
+    const svg = this.#svg;
+    const want = new Set(nodes.filter(Boolean));
+    // What goes goes first — or a stale node (last render's ribbon, rebuilt
+    // this one) standing ahead of the kept wires would have every one of
+    // them moved past it.
+    for (let n = svg.firstChild; n;) {
+      const next = n.nextSibling;
+      if (!want.has(n)) n.remove();
+      n = next;
+    }
+    let at = svg.firstChild;
+    for (const node of want) {
+      if (node === at) {
+        at = at.nextSibling;
+        continue;
+      }
+      svg.insertBefore(node, at);
+    }
   }
 
   /**
@@ -550,8 +696,7 @@ export class WireLayer {
       svgEl("stop", { offset: 1, "stop-color": "#fff", "stop-opacity": 0 }),
     );
     defs.append(gradient);
-    this.#svg.append(defs);
-    return defs;
+    return defs; // placed first by render's #sync
   }
 
   /**
@@ -563,7 +708,7 @@ export class WireLayer {
    * (right on the holes, where the mask is solid) survive.
    *
    * Ids are keyed by wire id, so a rebuild replaces its own mask rather than
-   * piling up (`clear()` empties the whole svg first either way).
+   * piling up (render's #sync drops the old `<defs>` either way).
    */
   #appendFadeMask(defs, wireId, ends) {
     const maskId = `wire-fade-${wireId}`;
@@ -666,11 +811,7 @@ export class WireLayer {
     g.append(
       svgEl("path", { class: "bus-band-hit", d: wirePath(geo.A, geo.B) }),
     );
-    g.addEventListener("click", (e) => this.#onSelectBus?.(bus.id, e));
-    g.addEventListener("contextmenu", (e) =>
-      this.#onBusContextMenu?.(bus.id, e),
-    );
-    return g;
+    return g; // its click and contextmenu are the svg's (#listen)
   }
 
   /**
@@ -756,6 +897,8 @@ export class WireLayer {
    * @param {{wireId:string, end:"from"|"to", world:{x:number,y:number}, legal?:boolean}|null} spec
    */
   setEndpointDrag(spec) {
+    // A snapped end sits on one hole for many pointermoves: the same picture.
+    if (sameSpec(spec, this.#endpointDrag)) return;
     this.#endpointDrag = spec;
     this.render();
   }
@@ -768,6 +911,7 @@ export class WireLayer {
    * @param {{wireId:string, from:{x:number,y:number}, to:{x:number,y:number}, legal?:boolean}|null} spec
    */
   setWholeDrag(spec) {
+    if (sameSpec(spec, this.#wholeDrag)) return;
     this.#wholeDrag = spec;
     this.render();
   }
@@ -782,6 +926,7 @@ export class WireLayer {
    *   world:{x:number,y:number}, merge?:boolean}|null} spec
    */
   setPointDrag(spec) {
+    if (sameSpec(spec, this.#pointDrag)) return;
     this.#pointDrag = spec;
     this.render();
   }

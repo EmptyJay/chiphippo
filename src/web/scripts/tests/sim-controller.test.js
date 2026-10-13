@@ -197,6 +197,26 @@ test("Stop dismisses the run's toasts and leaves everyone else's", () => {
   assert.ok(!notifications.calls.some((c) => c.cleared));
 });
 
+test("a standing warning is raised once a run, a danger one sticky — never once a tick", () => {
+  resetDom();
+  const notifications = fakeNotifications();
+  const sim = new SimController({
+    deskDoc: fakeDoc(poweredDoc(12)), // 12 V: smoke, and it stands
+    notifications,
+  });
+  sim.start();
+  sim.pause();
+  for (let i = 0; i < 5; i++) sim.step();
+  const raised = notifications.calls.filter((c) => c.key?.startsWith("smoke:"));
+  assert.equal(raised.length, 1, "said once, however many ticks repeat it");
+  assert.equal(raised[0].sticky, true, "a fault stays up while it stands");
+  sim.stop();
+  // A fresh run says it again.
+  sim.start();
+  assert.equal(notifications.calls.filter((c) => c.key?.startsWith("smoke:")).length, 2); // prettier-ignore
+  sim.stop();
+});
+
 test("pause freezes the transport; resume returns to running", () => {
   resetDom();
   const modes = [];

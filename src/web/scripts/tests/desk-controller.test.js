@@ -3215,3 +3215,109 @@ test("an edit taken back before Stop leaves no empty undo step", () => {
   controller.undo();
   assert.equal(doc.components.length, 0, "one ⌘Z undoes the chip");
 });
+
+test("a wire or bus is 'in progress' only once its first end is laid", async () => {
+  const { WireTools } = await import("../components/wire-tools.js");
+  const { BusTools } = await import("../components/bus-tools.js");
+  for (const [Tool, kind] of [
+    [WireTools, "wire"],
+    [BusTools, "bus"],
+  ]) {
+    const host = { mode: null };
+    const tool = new Tool(host);
+    assert.equal(tool.pending, false, `${kind}: not armed`);
+    host.mode = { kind, from: null };
+    assert.equal(tool.armed, true);
+    assert.equal(tool.pending, false, `${kind}: armed, nothing laid — Space may run`); // prettier-ignore
+    host.mode = { kind, from: "bb1.a1" };
+    assert.equal(tool.pending, true, `${kind}: its first end laid`);
+  }
+  resetDom();
+  const { controller } = makeDesk(new DeskDoc(null));
+  controller.armWireTool();
+  assert.equal(controller.layingInProgress, false);
+});
+
+test("an edit tried while running is told why; a look or a harmless key is not", () => {
+  resetDom();
+  const viewport = document.createElement("section");
+  const surface = document.createElement("div");
+  viewport.append(surface);
+  document.body.append(viewport);
+  const deskView = {
+    surface,
+    camera: { cx: 0, cy: 0, zoom: 1 },
+    worldFromEvent: () => ({ x: 0, y: 0 }),
+    setCamera: () => {},
+  };
+  let refused = 0;
+  const controller = new DeskController({
+    viewport,
+    deskView,
+    deskDoc: new DeskDoc(null),
+    onEditRefused: () => refused++,
+  });
+  controller.setEditingLocked(true);
+  const key = (k, mods = {}) =>
+    controller.handleKeyDown(new window.KeyboardEvent("keydown", { key: k, ...mods })); // prettier-ignore
+  key("ArrowLeft");
+  key("h"); // H fades the wires: allowed while running
+  assert.equal(refused, 0, "nothing refused yet");
+  key("Delete");
+  assert.equal(refused, 1, "Delete is an edit");
+  key("v", { metaKey: true });
+  key("r");
+  assert.equal(refused, 3);
+  assert.equal(controller.undo(), false);
+  assert.equal(refused, 4, "⌘Z is an edit");
+  controller.setEditingLocked(false);
+  key("Delete");
+  assert.equal(refused, 4, "stopped: nothing to refuse");
+});
+
+test("an undo remounts only the views whose data it changes", () => {
+  resetDom();
+  const doc = new DeskDoc(null);
+  const { surface, controller } = makeDesk(doc);
+  controller.addBoardAt("pins-full", 0, 0);
+  controller.addComponentAt("74LS00", "bb1", "e5");
+  controller.addComponentAt("74LS04", "bb1", "e20");
+  const board = () => surface.querySelector(".board");
+  const chips = () => [...surface.querySelectorAll(".part-chip")];
+  const [b0, [c0, c1]] = [board(), chips()];
+  // Adding the third part, then undoing it, leaves the board and both chips
+  // exactly as they were — the same nodes.
+  controller.addComponentAt("74LS08", "bb1", "e35");
+  assert.equal(chips().length, 3);
+  controller.undo();
+  assert.equal(board(), b0, "the board is kept");
+  assert.deepEqual(chips(), [c0, c1], "both chips are kept, in order");
+  // Undoing a part's add removes just it.
+  controller.undo();
+  assert.equal(board(), b0);
+  assert.deepEqual(chips(), [c0]);
+  // Redo brings it back as a fresh view; the rest stay.
+  controller.redo();
+  assert.equal(board(), b0);
+  assert.equal(chips()[0], c0);
+  assert.equal(chips().length, 2);
+});
+
+test("a desktop switch keeps the strips both desks share and remounts every part", () => {
+  resetDom();
+  const doc = new DeskDoc(null);
+  const { surface, controller } = makeDesk(doc);
+  controller.addBoardAt("pins-full", 0, 0);
+  controller.addComponentAt("74LS00", "bb1", "e5");
+  const b0 = surface.querySelector(".board");
+  const c0 = surface.querySelector(".part-chip");
+  const other = doc.toJSON();
+  controller.loadDocument(other);
+  assert.equal(surface.querySelector(".board"), b0, "the same strip: kept");
+  assert.notEqual(
+    surface.querySelector(".part-chip"),
+    c0,
+    "parts: another circuit's",
+  );
+  assert.equal(surface.querySelectorAll(".part-chip").length, 1);
+});

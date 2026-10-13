@@ -1223,8 +1223,10 @@ function bindShortcuts(
         return;
       }
     }
-    // Space runs/stops the circuit — but not while typing, and not when a
-    // placement/wire tool is armed (it may want the key for its own gesture).
+    // Space runs/stops the circuit — but not while typing, not with a part in
+    // hand, and not with a wire or bus half laid (Run would throw it away).
+    // An armed wire or bus tool with nothing laid is no reason to refuse:
+    // neither tool uses Space, and Run disarms them both.
     if (e.key === " " || e.code === "Space") {
       const tag = e.target?.tagName;
       if (
@@ -1236,8 +1238,7 @@ function bindShortcuts(
       }
       if (
         controller.placementArmed ||
-        controller.wireToolArmed ||
-        controller.busToolArmed ||
+        controller.layingInProgress ||
         e.metaKey ||
         e.ctrlKey ||
         e.altKey
@@ -1805,6 +1806,17 @@ async function init() {
       scopeView.addNetChannel(address, opts);
       scopeView.setVisible(true);
     },
+    // An edit tried while the circuit runs: one toast says why (its key
+    // collapses repeats), with the Stop that gets the desk back.
+    onEditRefused: () =>
+      notifications.notify({
+        key: "edit-while-running",
+        variant: "info",
+        title: t("desk.locked.title"),
+        message: t("desk.locked.message"),
+        actionLabel: t("desk.locked.stop"),
+        onAction: () => sim?.stop(),
+      }),
     onClockToggle: (id) => sim?.manualToggle(id),
     onClockPause: (id) => sim?.toggleClockPause(id),
     // A signal flag selected on the desk lights its button on the rail.
@@ -2178,7 +2190,7 @@ async function init() {
 
   // Surface net-name merge conflicts (Feature 120) as toasts — a name that
   // loses a merge is reported, never silently dropped.
-  new NetNameMonitor(netlistCache, notifications);
+  new NetNameMonitor(netlistCache, notifications, () => deskDoc.netNameCount);
 
   // Auto-update: the always-on surface for whatever the updater is doing. It
   // is the only one that survives Settings being closed, which is why it lives

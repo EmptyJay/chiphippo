@@ -1278,6 +1278,11 @@
     },
     "speaker": {
       "playing": "Spielt {hz}"
+    },
+    "locked": {
+      "title": "Die Schaltung läuft",
+      "message": "Während die Schaltung läuft, lässt sich der Tisch nicht bearbeiten. Drücken Sie die Leertaste oder Stopp, um ihn zu bearbeiten.",
+      "stop": "Stopp"
     }
   },
   "workspace": {
@@ -2486,6 +2491,12 @@
       "combLoop": "Kombinatorische Schleife: {names}. assign und always @(*) können keinen Zustand halten — verwenden Sie einen always @(posedge …)-Block.",
       "badPortName": "{name} kann in Verilog kein Pinname sein — verwenden Sie Buchstaben, Ziffern und _, beginnend mit einem Buchstaben.",
       "duplicatePort": "Zwei Pins heißen {name}."
+    }
+  },
+  "toast": {
+    "more": {
+      "one": "+{count} weitere",
+      "other": "+{count} weitere"
     }
   }
 }

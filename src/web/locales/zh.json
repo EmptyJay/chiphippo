@@ -1260,6 +1260,11 @@
     },
     "speaker": {
       "playing": "正在播放 {hz}"
+    },
+    "locked": {
+      "title": "电路正在运行",
+      "message": "电路运行时无法编辑桌面。按空格键或点击停止即可编辑。",
+      "stop": "停止"
     }
   },
   "workspace": {
@@ -2447,6 +2452,11 @@
       "combLoop": "组合逻辑环路：{names}。assign 和 always @(*) 无法保持状态 — 请使用 always @(posedge …) 块。",
       "badPortName": "{name} 不能作为 Verilog 中的引脚名 — 请使用字母、数字和 _，并以字母开头。",
       "duplicatePort": "有两个引脚都叫 {name}。"
+    }
+  },
+  "toast": {
+    "more": {
+      "other": "+还有 {count} 条"
     }
   }
 }

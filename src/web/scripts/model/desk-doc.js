@@ -3554,6 +3554,11 @@ export class DeskDoc {
   // bus id. Passive — no occupancy/netlist/engine effect; a dead ref reads as
   // undriven, coming back to life if its target returns (undo, re-add).
 
+  /** How many net names the desk holds (no copies made). */
+  get netNameCount() {
+    return this.#doc.netNames.length;
+  }
+
   /** Copies of the analyzer channels, in display order. */
   get scopeChannels() {
     return this.#doc.scopeChannels.map((c) => ({ ...c }));

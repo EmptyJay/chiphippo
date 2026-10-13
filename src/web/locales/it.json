@@ -1279,6 +1279,11 @@
     },
     "speaker": {
       "playing": "Suona a {hz}"
+    },
+    "locked": {
+      "title": "Il circuito è in funzione",
+      "message": "Non si può modificare il banco mentre il circuito è in funzione. Premi Spazio, o Ferma, per modificarlo.",
+      "stop": "Ferma"
     }
   },
   "workspace": {
@@ -2489,6 +2494,12 @@
       "combLoop": "Anello combinatorio: {names}. assign e always @(*) non possono mantenere uno stato — usa un blocco always @(posedge …).",
       "badPortName": "{name} non può essere un nome di pin in Verilog — usa lettere, cifre e _, iniziando con una lettera.",
       "duplicatePort": "Due pin si chiamano {name}."
+    }
+  },
+  "toast": {
+    "more": {
+      "one": "+altri {count}",
+      "other": "+altri {count}"
     }
   }
 }

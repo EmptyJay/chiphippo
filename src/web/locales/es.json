@@ -1279,6 +1279,11 @@
     },
     "speaker": {
       "playing": "Suena a {hz}"
+    },
+    "locked": {
+      "title": "El circuito está en marcha",
+      "message": "No se puede editar la mesa mientras el circuito funciona. Pulse Espacio, o Detener, para editarla.",
+      "stop": "Detener"
     }
   },
   "workspace": {
@@ -2489,6 +2494,12 @@
       "combLoop": "Bucle combinacional: {names}. assign y always @(*) no pueden guardar estado — usa un bloque always @(posedge …).",
       "badPortName": "{name} no puede ser un nombre de pin en Verilog — usa letras, dígitos y _, empezando por una letra.",
       "duplicatePort": "Hay dos pines que se llaman {name}."
+    }
+  },
+  "toast": {
+    "more": {
+      "one": "+{count} más",
+      "other": "+{count} más"
     }
   }
 }

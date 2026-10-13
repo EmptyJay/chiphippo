@@ -115,11 +115,14 @@ test("board-drag overrides shift wire endpoints live", () => {
 
   const a = holePosition("pins-full", "a1");
   wires.render(new Map([["bb1", { x: 50, y: 7 }]]));
-  const d = layer.querySelector(".wire-core").getAttribute("d");
-  assert.ok(
-    d.startsWith(`M ${(50 + a.x) * PX_PER_UNIT} ${(7 + a.y) * PX_PER_UNIT} `),
-    d,
-  );
+  // The whole wire rides bb1: its resting path, translated by the board's
+  // offset — so its first end lands where the moved hole is.
+  const g = layer.querySelector(".wire");
+  const d = g.querySelector(".wire-core").getAttribute("d");
+  const [, x0, y0] = /^M (\S+) (\S+) /.exec(d);
+  const [, tx, ty] = /translate\((\S+) (\S+)\)/.exec(g.getAttribute("transform")); // prettier-ignore
+  assert.ok(Math.abs(+x0 + +tx - (50 + a.x) * PX_PER_UNIT) < 1e-9);
+  assert.ok(Math.abs(+y0 + +ty - (7 + a.y) * PX_PER_UNIT) < 1e-9);
 });
 
 test("setEndpointDrag pins one end to a cursor point; null restores the doc", () => {
@@ -672,4 +675,101 @@ test("a routed wire's in-flight bend previews without touching the document", ()
     group.querySelector(".wire-core").getAttribute("d"),
     /L 44 210/,
   );
+});
+
+// ── Kept groups: a render redraws only what changed ────────────────────────
+
+test("a render keeps every unchanged wire's group and redraws only the moved one", () => {
+  resetDom();
+  const layer = document.createElement("div");
+  document.body.append(layer);
+  const doc = deskWithWire(); // w1 on bb1
+  doc.addWire({ from: "bb2.a1", to: "bb2.a5", color: "red" }); // w2 on bb2
+  const wires = new WireLayer(layer, doc, {});
+  const group = (id) => layer.querySelector(`.wire[data-wire-id="${id}"]`);
+  const [g1, g2] = [group("w1"), group("w2")];
+  wires.render();
+  assert.equal(group("w1"), g1, "nothing changed: the same nodes");
+  assert.equal(group("w2"), g2);
+  // One wire's end dragged: only that wire is redrawn.
+  wires.setEndpointDrag({ wireId: "w2", end: "to", world: { x: 999, y: 0 }, legal: true }); // prettier-ignore
+  assert.equal(group("w1"), g1, "the untouched wire is kept");
+  assert.notEqual(group("w2"), g2, "the dragged one is redrawn");
+  assert.equal(
+    layer.querySelectorAll(".wire").length,
+    2,
+    "and nothing piles up",
+  );
+});
+
+test("selecting lifts the wire over the rest without redrawing anything", () => {
+  resetDom();
+  const layer = document.createElement("div");
+  document.body.append(layer);
+  const doc = deskWithWire();
+  doc.addWire({ from: "bb1.b1", to: "bb1.b5", color: "red" });
+  const wires = new WireLayer(layer, doc, {});
+  const order = () => [...layer.querySelectorAll(".wire")].map((g) => g.dataset.wireId); // prettier-ignore
+  const g1 = layer.querySelector('.wire[data-wire-id="w1"]');
+  assert.deepEqual(order(), ["w1", "w2"]);
+  wires.setSelected("w1");
+  assert.deepEqual(order(), ["w2", "w1"], "the pick draws last");
+  assert.equal(
+    layer.querySelector('.wire[data-wire-id="w1"]'),
+    g1,
+    "the same group, moved",
+  );
+  assert.ok(g1.classList.contains("wire--selected"));
+  wires.setSelected(null);
+  assert.deepEqual(order(), ["w1", "w2"], "and back into document order");
+  assert.ok(!g1.classList.contains("wire--selected"));
+});
+
+test("a wire's click, menu and hover reach the layer's callbacks from the one svg", () => {
+  resetDom();
+  const layer = document.createElement("div");
+  document.body.append(layer);
+  const doc = deskWithWire();
+  const seen = [];
+  new WireLayer(layer, doc, {
+    onSelect: (id) => seen.push(["select", id]),
+    onContextMenu: (id) => seen.push(["menu", id]),
+    onHover: (id) => seen.push(["hover", id]),
+  });
+  const hit = layer.querySelector('.wire[data-wire-id="w1"] .wire-hit');
+  const cap = layer.querySelector('.wire[data-wire-id="w1"] .wire-cap');
+  hit.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  hit.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true }));
+  hit.dispatchEvent(new window.PointerEvent("pointerover", { bubbles: true, relatedTarget: layer })); // prettier-ignore
+  // Hit stroke → cap is inside the one wire: no leave, no second enter.
+  hit.dispatchEvent(new window.PointerEvent("pointerout", { bubbles: true, relatedTarget: cap })); // prettier-ignore
+  cap.dispatchEvent(new window.PointerEvent("pointerover", { bubbles: true, relatedTarget: hit })); // prettier-ignore
+  cap.dispatchEvent(new window.PointerEvent("pointerout", { bubbles: true, relatedTarget: layer })); // prettier-ignore
+  assert.deepEqual(seen, [
+    ["select", "w1"],
+    ["menu", "w1"],
+    ["hover", "w1"],
+    ["hover", null],
+  ]);
+});
+
+test("a wire whose board is dragged is its resting drawing, translated — not redrawn", () => {
+  resetDom();
+  const layer = document.createElement("div");
+  document.body.append(layer);
+  const doc = deskWithWire();
+  doc.addWire({ from: "bb1.j1", to: "bb2.a1", color: "red" }); // across both
+  const wires = new WireLayer(layer, doc, {});
+  const group = (id) => layer.querySelector(`.wire[data-wire-id="${id}"]`);
+  const g1 = group("w1");
+  const g2 = group("w2");
+  wires.render(new Map([["bb1", { x: 3, y: 2 }]]));
+  assert.equal(group("w1"), g1, "kept");
+  assert.equal(g1.getAttribute("transform"), `translate(${3 * PX_PER_UNIT} ${2 * PX_PER_UNIT})`); // prettier-ignore
+  assert.notEqual(group("w2"), g2, "a wire stretched between a moving and a still board is redrawn"); // prettier-ignore
+  assert.equal(group("w2").hasAttribute("transform"), false);
+  // Dropped (the doc unchanged, the drag over): back at rest, same group.
+  wires.render();
+  assert.equal(group("w1"), g1);
+  assert.equal(g1.hasAttribute("transform"), false);
 });

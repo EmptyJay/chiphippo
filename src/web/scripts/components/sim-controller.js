@@ -328,6 +328,12 @@ export class SimController {
   #memInfo = new Map(); // memory compId → { volatile, guid, width, byteLength }
   #dataLossWarned = new Set(); // programmed chips already warned of a missing file
   #toastKeys = new Set(); // the keys of the toasts this run has raised
+  // What each standing warning last SAID this run (key → its words): the
+  // engine reports every warning on every tick, and a toast re-sent each
+  // time never expired, came straight back when dismissed, and cost a
+  // message a tick from the Worker. Said once, it is said again only when
+  // its words change (#warn).
+  #warned = new Map();
   #schedule = new EdgeSchedule(); // the ticking clocks' edges, in sim time
   #pacer = null; // the ONE timer: it runs the next batch (#arm)
   #wall = wallMs; // the wall clock, ms (a test hands in its own)
@@ -589,6 +595,7 @@ export class SimController {
       this.#signalLevel.set(sig.id, restLevel(sig) === "high" ? H : L);
     }
     this.#dataLossWarned = new Set();
+    this.#warned.clear();
     try {
       this.#debug?.begin?.();
     } catch (err) {
@@ -772,6 +779,7 @@ export class SimController {
     // Cancel button down with every short and oscillation of the run.
     for (const key of this.#toastKeys) this.#notifications?.dismiss?.(key);
     this.#toastKeys.clear();
+    this.#warned.clear();
     // BEFORE #onTransportChange: stopping re-baselines undo/redo against the
     // live document (`#history.sync`), so the chips have to be whole by the
     // time that runs — otherwise the baseline would hold the damage and a ⌘Z
@@ -1289,6 +1297,20 @@ export class SimController {
   #notify(opts) {
     if (opts?.key) this.#toastKeys.add(opts.key);
     this.#notifications?.notify(opts);
+  }
+
+  /**
+   * A circuit warning (#report): raised the first time the run meets it, and
+   * again only when what it says changes — never once a tick. A DANGER one
+   * (a short, smoke, reversed power, supplies fighting) stays until it is
+   * clicked away or the run stops, so a fault does not vanish while it
+   * stands; the rest go after the stack's usual few seconds.
+   */
+  #warn(opts) {
+    const said = `${opts.variant}\u0000${opts.title ?? ""}\u0000${opts.message}`;
+    if (this.#warned.get(opts.key) === said) return;
+    this.#warned.set(opts.key, said);
+    this.#notify(opts.variant === "danger" ? { ...opts, sticky: true } : opts);
   }
 
   #autoClocks() {
@@ -2709,7 +2731,7 @@ export class SimController {
         // Through an analog switch — or a transistor switched on — the two
         // rails are still two nets, and the part between them is the thing
         // to look at.
-        this.#notify({
+        this.#warn({
           key: `short:${w.net}`,
           variant: "danger",
           title: t("sim.short"),
@@ -2723,21 +2745,21 @@ export class SimController {
           ),
         });
       } else if (w.type === "conflict") {
-        this.#notify({
+        this.#warn({
           key: `conflict:${w.net}`,
           variant: "warning",
           title: t("sim.conflict"),
           message: t("sim.conflictMessage", { net: w.net }),
         });
       } else if (w.type === "oscillation") {
-        this.#notify({
+        this.#warn({
           key: "oscillation",
           variant: "warning",
           title: t("sim.oscillation"),
           message: t("sim.oscillationMessage", { count: w.nets.length }),
         });
       } else if (w.type === "underpowered") {
-        this.#notify({
+        this.#warn({
           key: `under:${w.chip}`,
           variant: "warning",
           title: t("sim.underpowered"),
@@ -2748,14 +2770,14 @@ export class SimController {
           }),
         });
       } else if (w.type === "reversed") {
-        this.#notify({
+        this.#warn({
           key: `reversed:${w.chip}`,
           variant: "danger",
           title: t("sim.reversed"),
           message: t("sim.reversedMessage", { chip: this.#refName(w.chip) }),
         });
       } else if (w.type === "damaged") {
-        this.#notify({
+        this.#warn({
           key: `smoke:${w.chip}`,
           variant: "danger",
           title: t("sim.damaged"),
@@ -2769,7 +2791,7 @@ export class SimController {
         // Spice Lite: an output whose load holds its net where the inputs on
         // it no longer read the level it drives (spice/loads.js) — a circuit
         // that does not work, never smoke.
-        this.#notify({
+        this.#warn({
           key: `brownout:${w.chip}`,
           variant: "warning",
           title: t("sim.brownout"),
@@ -2785,7 +2807,7 @@ export class SimController {
         // Spice Lite: an analog switch channel past its sheet's rating — past
         // its smoke limit, brown smoke (latched like any other).
         const n = (x) => formatNumber(x, { maximumSignificantDigits: 3 });
-        this.#notify({
+        this.#warn({
           key: `switch:${w.chip}`,
           variant: w.smoke ? "danger" : "warning",
           title: t(w.smoke ? "sim.brownSmoke" : "sim.switchCurrent"),
@@ -2804,7 +2826,7 @@ export class SimController {
         // supply), and the warning says a real one would not.
         const n = (x) => formatNumber(x, { maximumSignificantDigits: 3 });
         const byPower = w.unit === "mW";
-        this.#notify({
+        this.#warn({
           key: `transistor:${w.comp}`,
           variant: w.smoke ? "danger" : "warning",
           title: t("sim.transistorOverload"),
@@ -2827,7 +2849,7 @@ export class SimController {
       } else if (w.type === "linear-bias") {
         // Spice Lite: a gate its own feedback resistor biases half way up its
         // transfer curve — an amplifier, which Spice Lite does not model.
-        this.#notify({
+        this.#warn({
           key: `bias:${w.chip}`,
           variant: "warning",
           title: t("sim.linearBias"),
@@ -2841,7 +2863,7 @@ export class SimController {
         // through a transistor's breakdown — no flyback diode across it. The
         // transistor carries on (nothing latches a part with no supply).
         const n = (x) => formatNumber(x, { maximumSignificantDigits: 3 });
-        this.#notify({
+        this.#warn({
           key: `kick:${w.comp}`,
           variant: "warning",
           title: t("sim.inductiveKick"),
@@ -2858,7 +2880,7 @@ export class SimController {
       } else if (w.type === "supply-spike") {
         // Spice Lite: chips switching together asked more of a supply than
         // its limit, with nothing across the rails to supply the spike.
-        this.#notify({
+        this.#warn({
           key: `spike:${w.psu}`,
           variant: "warning",
           title: t("sim.supplySpike"),
@@ -2873,7 +2895,7 @@ export class SimController {
       } else if (w.type === "led-burnt") {
         // Spice Lite: an LED's junction passed its maximum temperature. One
         // key per part, so it replaces that LED's overdriven warning.
-        this.#notify({
+        this.#warn({
           key: `led:${w.comp}`,
           variant: "danger",
           title: t("sim.ledBurnt"),
@@ -2886,7 +2908,7 @@ export class SimController {
         });
       } else if (w.type === "clock-unpowered") {
         // A clock runs from a supply like any instrument on the bench.
-        this.#notify({
+        this.#warn({
           key: `clock-power:${w.chip}`,
           variant: "warning",
           title: t("sim.clockUnpowered"),
@@ -2897,7 +2919,7 @@ export class SimController {
       } else if (w.type === "diode-burnt") {
         // Spice Lite: a diode's junction passed its maximum temperature —
         // one straight across the rails, or an output into ground.
-        this.#notify({
+        this.#warn({
           key: `diode:${w.comp}`,
           variant: "danger",
           title: t("sim.diodeBurnt"),
@@ -2914,7 +2936,7 @@ export class SimController {
         // a CD4000 one — and past its smoke limit, brown smoke.
         const n = (x) => formatNumber(x, { maximumSignificantDigits: 3 });
         const byPower = w.unit === "mW";
-        this.#notify({
+        this.#warn({
           key: `output:${w.chip}`,
           variant: w.smoke ? "danger" : "warning",
           title: t(w.smoke ? "sim.brownSmoke" : "sim.outputCurrent"),
@@ -2939,7 +2961,7 @@ export class SimController {
         // Spice Lite: a monostable's discharge transistor holding more than
         // its sheet's least timing resistor lets through — Rx too small.
         const n = (x) => formatNumber(x, { maximumSignificantDigits: 3 });
-        this.#notify({
+        this.#warn({
           key: `output:${w.chip}`,
           variant: "warning",
           title: t("sim.rxCurrent"),
@@ -2953,7 +2975,7 @@ export class SimController {
         });
       } else if (w.type === "input-overvoltage") {
         // Spice Lite: a 74LS input held past its absolute maximum.
-        this.#notify({
+        this.#warn({
           key: `input:${w.chip}`,
           variant: "danger",
           title: t("sim.brownSmoke"),
@@ -2968,7 +2990,7 @@ export class SimController {
         // Spice Lite: a CD4000 or MOS input held past one of its rails, its
         // protection diode conducting — past its rating, brown smoke.
         const n = (x) => formatNumber(x, { maximumSignificantDigits: 3 });
-        this.#notify({
+        this.#warn({
           key: `input:${w.chip}`,
           variant: w.smoke ? "danger" : "warning",
           title: t(w.smoke ? "sim.brownSmoke" : "sim.inputClamp"),
@@ -2984,7 +3006,7 @@ export class SimController {
           ),
         });
       } else if (w.type === "led-overdriven") {
-        this.#notify({
+        this.#warn({
           key: `led:${w.comp}`,
           variant: "warning",
           title: t("sim.ledOverdriven"),
@@ -2995,7 +3017,7 @@ export class SimController {
           }),
         });
       } else if (w.type === "led-reverse") {
-        this.#notify({
+        this.#warn({
           key: `led-reverse:${w.comp}`,
           variant: "warning",
           title: t("sim.ledReverse"),
@@ -3006,7 +3028,7 @@ export class SimController {
           }),
         });
       } else if (w.type === "overloaded") {
-        this.#notify({
+        this.#warn({
           key: `brownout:${w.chip}`,
           variant: "danger",
           title: t("sim.brownSmoke"),
@@ -3015,7 +3037,7 @@ export class SimController {
       } else if (w.type === "floating-input") {
         // Feature 400: a CMOS input nothing drives reads unknown — quiet on
         // its own (an LED on an X net is just dark), so it is said.
-        this.#notify({
+        this.#warn({
           key: `floating:${w.chip}`,
           variant: "warning",
           title: t("sim.floatingInput"),
@@ -3026,14 +3048,14 @@ export class SimController {
           }),
         });
       } else if (w.type === "marginal-high") {
-        this.#notify({
+        this.#warn({
           key: `marginal:${w.net}`,
           variant: "warning",
           title: t("sim.marginalHigh"),
           message: t("sim.marginalHighMessage", { net: w.net }),
         });
       } else if (w.type === "ls-fanout") {
-        this.#notify({
+        this.#warn({
           key: `fanout:${w.net}`,
           variant: "warning",
           title: t("sim.lsFanout"),
@@ -3047,7 +3069,7 @@ export class SimController {
       } else if (w.type === "timing") {
         // A timed part that cannot read its own R and C: it says what is
         // missing rather than guess, and holds its output (sim/timing.js).
-        this.#notify({
+        this.#warn({
           key: `timing:${w.chip}`,
           variant: "warning",
           title: t("sim.timing"),
@@ -3060,7 +3082,7 @@ export class SimController {
         // Two PSUs at different voltages feed one `+` net — the halves of a
         // split rail jumpered together, say. Danger, like a short: one
         // supply is driving current back into the other.
-        this.#notify({
+        this.#warn({
           key: `supplies:${w.net}`,
           variant: "danger",
           title: t("sim.suppliesMeet"),
@@ -3070,7 +3092,7 @@ export class SimController {
           }),
         });
       } else if (w.type === "mixed-supply") {
-        this.#notify({
+        this.#warn({
           key: `mixed:${w.net}`,
           variant: "warning",
           title: t("sim.mixedSupply"),

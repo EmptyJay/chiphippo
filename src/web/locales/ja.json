@@ -1260,6 +1260,11 @@
     },
     "speaker": {
       "playing": "{hz} で鳴っています"
+    },
+    "locked": {
+      "title": "回路を実行中です",
+      "message": "回路の実行中はデスクを編集できません。編集するにはスペースキーを押すか、停止をクリックしてください。",
+      "stop": "停止"
     }
   },
   "workspace": {
@@ -2447,6 +2452,11 @@
       "combLoop": "組み合わせループ: {names}。assign と always @(*) は状態を保持できません — always @(posedge …) ブロックを使ってください。",
       "badPortName": "{name} は Verilog のピン名にできません — 英字・数字・_ を使い、先頭は英字にしてください。",
       "duplicatePort": "{name} という名前のピンが 2 つあります。"
+    }
+  },
+  "toast": {
+    "more": {
+      "other": "+ほか {count} 件"
     }
   }
 }

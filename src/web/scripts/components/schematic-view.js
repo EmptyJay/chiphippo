@@ -862,6 +862,10 @@ export class SchematicView {
 
   #svg = null;
   #result = null;
+  // The document changed while the diagram was hidden: it is laid out and
+  // drawn again when it is next shown, not on every edit nobody can see
+  // (a hidden schematic was most of an edit's cost on a big desk).
+  #stale = true;
   #hint; // "add chips" overlay
 
   #levels = new Map();
@@ -938,7 +942,7 @@ export class SchematicView {
       // switch flipped) leaves the symbol where it is — the drag's end
       // redraws, by its commit or by its own render.
       if (e?.detail?.replaced) this.#cancelDrag();
-      if (!this.#drag) this.#render();
+      if (!this.#drag) this.#renderIfShown();
     };
     window.addEventListener("chiphippo:doc-changed", this.#onDocChanged);
     this.#onSimState = (e) => this.#applySim(e.detail);
@@ -947,7 +951,7 @@ export class SchematicView {
     window.addEventListener("chiphippo:net-probed", this.#onProbed);
 
     this.#deskView.surface.addEventListener("pointerdown", this.#onPointerDown);
-    this.#render();
+    this.#renderIfShown();
   }
 
   /**
@@ -960,7 +964,7 @@ export class SchematicView {
     const auto = this.#hint.parentElement?.querySelector(".schematic-tool-btn");
     if (auto) auto.textContent = t("schematic.autoLayout");
     this.#zoomControl.relocalize();
-    this.#render();
+    this.#renderIfShown();
   }
 
   /** Show or hide the schematic; fit the diagram the first time it is shown.
@@ -968,9 +972,11 @@ export class SchematicView {
       schematic only remembers the live levels (`#applySim`). */
   setVisible(on) {
     this.#viewport.hidden = !on;
+    if (on && this.#stale) this.#render();
     if (on && this.#svg) {
       applyLevels(this.#svg, this.#levels, this.#running);
       applyStatus(this.#svg, this.#chipStatus, this.#running);
+      applyHighlight(this.#svg, this.#highlightNet);
     }
     if (on && !this.#fitted && this.#result?.nodes.length) {
       this.fit();
@@ -996,6 +1002,7 @@ export class SchematicView {
 
   /** Centre + scale the camera to frame the whole diagram. */
   fit() {
+    if (this.#stale) this.#render();
     const b = this.#result?.bounds;
     if (!b) return;
     const rect = this.#viewport.getBoundingClientRect();
@@ -1027,7 +1034,14 @@ export class SchematicView {
     return hints;
   }
 
+  /** Draw now if the diagram is on screen, else at the next show. */
+  #renderIfShown() {
+    if (this.#viewport.hidden) this.#stale = true;
+    else this.#render();
+  }
+
   #render() {
+    this.#stale = false;
     this.#result = layout(
       this.#doc.toJSON(),
       this.#netlist.get(),
@@ -1058,8 +1072,13 @@ export class SchematicView {
   }
 
   #applyProbe(detail) {
-    this.#highlightNet = detail?.netId ?? null;
-    if (this.#svg) applyHighlight(this.#svg, this.#highlightNet);
+    const net = detail?.netId ?? null;
+    if (net === this.#highlightNet) return;
+    this.#highlightNet = net;
+    // Hidden, it only remembers the net: a render (at the next show) applies
+    // it, and walking every [data-nets] node of a diagram nobody can see was
+    // a probe sweep's cost.
+    if (this.#svg && !this.#viewport.hidden) applyHighlight(this.#svg, net);
   }
 
   // ── Symbol drag (nudge → schematicPos) ───────────────────────────────────────

@@ -1279,6 +1279,11 @@
     },
     "speaker": {
       "playing": "Joue {hz}"
+    },
+    "locked": {
+      "title": "Le circuit tourne",
+      "message": "Le plan de travail ne peut pas être modifié pendant que le circuit tourne. Appuyez sur Espace, ou Arrêt, pour le modifier.",
+      "stop": "Arrêt"
     }
   },
   "workspace": {
@@ -2489,6 +2494,12 @@
       "combLoop": "Boucle combinatoire : {names}. assign et always @(*) ne peuvent pas mémoriser d'état — utilisez un bloc always @(posedge …).",
       "badPortName": "{name} ne peut pas être un nom de broche en Verilog — utilisez des lettres, des chiffres et _, en commençant par une lettre.",
       "duplicatePort": "Deux broches s'appellent {name}."
+    }
+  },
+  "toast": {
+    "more": {
+      "one": "+{count} de plus",
+      "other": "+{count} de plus"
     }
   }
 }

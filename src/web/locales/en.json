@@ -1278,6 +1278,11 @@
     },
     "speaker": {
       "playing": "Playing {hz}"
+    },
+    "locked": {
+      "title": "The circuit is running",
+      "message": "The desk can't be edited while the circuit runs. Press Space, or Stop, to edit it.",
+      "stop": "Stop"
     }
   },
   "workspace": {
@@ -2486,6 +2491,12 @@
       "combLoop": "Combinational loop: {names}. assign and always @(*) cannot hold state — use an always @(posedge …) block.",
       "badPortName": "{name} cannot be a pin name in Verilog — use letters, digits and _, starting with a letter.",
       "duplicatePort": "Two pins are named {name}."
+    }
+  },
+  "toast": {
+    "more": {
+      "one": "+{count} more",
+      "other": "+{count} more"
     }
   }
 }

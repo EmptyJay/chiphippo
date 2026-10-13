@@ -135,7 +135,10 @@ export class DeskPlacement {
   }
 
   enter(mode) {
-    if (this.#host.editingLocked) return; // topology is frozen while running
+    if (this.#host.editingLocked) {
+      this.#host.refuseEdit?.(); // topology is frozen while running: say so
+      return;
+    }
     this.cancelPlacement();
     this.#host.disarmWireTool();
     this.#host.disarmBusTool();

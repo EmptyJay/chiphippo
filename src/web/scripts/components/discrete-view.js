@@ -2094,6 +2094,7 @@ export class DiscreteView {
   #ref;
   #rotated = false; // a two-free-ends part — rendered/placed as a span
   #params = {}; // latest params (the span body needs LED colour/flip)
+  #spanKey = null; // the span (and params) the drawn span body was built for
   // What `setStatus` last drew — undefined until it has, and again whenever
   // the SVG (and the hint inside it) is rebuilt — so the status that arrives
   // unchanged with every tick touches nothing.
@@ -2150,6 +2151,7 @@ export class DiscreteView {
       span part is rendered by updateSpanWorld (needs geometry), so skip. */
   updateParams(params) {
     this.#params = params ?? {};
+    this.#spanKey = null; // the next updateSpanWorld draws afresh
     this.#rotated = Boolean(partDef(this.#ref)?.rotatable);
     if (this.#rotated) return;
     this.#el.querySelector("svg")?.remove();
@@ -2175,9 +2177,17 @@ export class DiscreteView {
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     this.#rotated = true;
-    this.#el.querySelector("svg")?.remove();
-    this.#el.prepend(buildSpanSvg(this.#ref, dx, dy, this.#params));
-    this.#rebuilt();
+    // The same span and params draw the same body: a rigid move (its board
+    // dragged, the part carried in a cluster) only places it again. Rebuilt
+    // on every pointermove, each resistor and LED on a dragged board was a
+    // fresh SVG — burn overlay and all — a frame.
+    const key = `${dx},${dy}|${JSON.stringify(this.#params)}`;
+    if (key !== this.#spanKey || !this.#el.querySelector("svg")) {
+      this.#spanKey = key;
+      this.#el.querySelector("svg")?.remove();
+      this.#el.prepend(buildSpanSvg(this.#ref, dx, dy, this.#params));
+      this.#rebuilt();
+    }
     const pad = spanPad(this.#ref);
     const minX = Math.min(0, dx) - pad;
     const minY = Math.min(0, dy) - pad;

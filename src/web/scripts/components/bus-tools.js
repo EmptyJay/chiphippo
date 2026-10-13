@@ -92,6 +92,11 @@ export class BusTools {
     return this.#host.mode?.kind === "bus";
   }
 
+  /** Armed with a bus's start run already anchored. */
+  get pending() {
+    return this.armed && this.#host.mode.from != null;
+  }
+
   arm() {
     if (this.armed || this.#host.editingLocked) return;
     this.#host.cancelPlacement();
@@ -611,6 +616,7 @@ export class BusTools {
     // the cursor (a member's hole sits under the band's own hit area, so
     // without this both menus fire — see WireTools.onContextMenu).
     if (this.#host.probeArmed) return;
+    if (this.#host.editingLocked) this.#host.refuseEdit?.();
     if (this.#host.mode || this.#host.editingLocked) return;
     this.#host.selectBus(id);
     const bus = this.#doc().getBus(id);

@@ -108,3 +108,24 @@ test("a non-sticky toast times out on its own; dismissing an unknown key is a no
   assert.equal(toasts().length, 0);
   assert.doesNotThrow(() => stack.dismiss("nobody"));
 });
+
+test("past the shown few, older toasts wait behind a '+N more' line that shows them all", async () => {
+  const { MAX_SHOWN_TOASTS } =
+    await import("../components/notification-stack.js");
+  resetDom();
+  const stack = new NotificationStack(document.body);
+  for (let i = 0; i < MAX_SHOWN_TOASTS + 3; i++) {
+    stack.notify({ key: `k${i}`, message: `m${i}`, sticky: true });
+  }
+  const shown = () =>
+    toasts().filter((n) => !n.classList.contains("toast--overflow"));
+  assert.equal(shown().length, MAX_SHOWN_TOASTS);
+  assert.deepEqual(shown().map((n) => n.dataset.key), ["k3", "k4", "k5", "k6"], "the newest"); // prettier-ignore
+  const more = document.querySelector(".toast-more");
+  assert.equal(more.hidden, false);
+  assert.equal(more.textContent, "+3 more");
+  more.click();
+  assert.equal(shown().length, MAX_SHOWN_TOASTS + 3, "all of them, once asked");
+  for (let i = 0; i < MAX_SHOWN_TOASTS + 3; i++) stack.dismiss(`k${i}`);
+  assert.equal(more.hidden, true);
+});

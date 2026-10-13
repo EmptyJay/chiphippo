@@ -197,3 +197,18 @@ test("the cache's nameAt is the name at a point, whichever partition it holds", 
     assert.equal(cache.nameAt("bb1.+25"), null);
   }
 });
+
+test("the name-conflict check builds no netlist on a desk with fewer than two names", async () => {
+  resetDom();
+  const { NetNameMonitor } = await import("../components/net-name-monitor.js");
+  let builds = 0;
+  let names = 0;
+  const cache = { get: () => (builds++, { nameConflicts: [] }) };
+  new NetNameMonitor(cache, { notify() {} }, () => names);
+  window.dispatchEvent(new window.CustomEvent("chiphippo:doc-changed"));
+  window.dispatchEvent(new window.CustomEvent("chiphippo:part-state"));
+  assert.equal(builds, 0, "nothing to merge, nothing built");
+  names = 2;
+  window.dispatchEvent(new window.CustomEvent("chiphippo:doc-changed"));
+  assert.equal(builds, 1, "two names can merge: checked");
+});

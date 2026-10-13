@@ -24,12 +24,20 @@
 // duplicates of the same standing warning.
 
 import { el } from "../dom.js";
+import { t } from "../i18n.js";
 
 const DEFAULT_TIMEOUT_MS = 6000;
 
+/** The most toasts shown at once; the older ones wait behind a "+N more"
+    line (click it to see them all), so a run that goes badly wrong cannot
+    bury the desk's right-hand side in a column of warnings. */
+export const MAX_SHOWN_TOASTS = 4;
+
 export class NotificationStack {
   #el;
-  #live = new Map(); // key → { toast, timer }
+  #live = new Map(); // key → { toast, timer }, oldest first
+  #more; // the "+N more" line
+  #expanded = false; // the more line was clicked: every toast is shown
 
   /** @param {HTMLElement} container - typically document.body / the app root. */
   constructor(container) {
@@ -38,7 +46,28 @@ export class NotificationStack {
       role: "status",
       "aria-live": "polite",
     });
+    this.#more = el("button", {
+      class: "toast-more",
+      type: "button",
+      hidden: true,
+      onClick: () => {
+        this.#expanded = true;
+        this.#layout();
+      },
+    });
+    this.#el.append(this.#more);
     container.append(this.#el);
+  }
+
+  /** Show the newest MAX_SHOWN_TOASTS (all of them once expanded) and say
+      how many more wait behind them. */
+  #layout() {
+    const entries = [...this.#live.values()];
+    const over = this.#expanded ? 0 : Math.max(0, entries.length - MAX_SHOWN_TOASTS); // prettier-ignore
+    entries.forEach((e, i) => e.toast.classList.toggle("toast--overflow", i < over)); // prettier-ignore
+    this.#more.hidden = over === 0;
+    if (over) this.#more.textContent = t("toast.more", { count: over });
+    if (entries.length <= MAX_SHOWN_TOASTS) this.#expanded = false;
   }
 
   /**
@@ -119,12 +148,13 @@ export class NotificationStack {
       ].filter(Boolean),
     );
     if (dismissible) toast.addEventListener("click", () => this.dismiss(id));
-    this.#el.append(toast);
+    this.#el.insertBefore(toast, this.#more);
     this.#live.set(id, {
       toast,
       variant,
       timer: sticky ? null : this.#arm(id),
     });
+    this.#layout();
   }
 
   #arm(id) {
@@ -137,5 +167,6 @@ export class NotificationStack {
     clearTimeout(entry.timer);
     entry.toast.remove();
     this.#live.delete(id);
+    this.#layout();
   }
 }

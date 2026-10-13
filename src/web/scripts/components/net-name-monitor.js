@@ -36,20 +36,26 @@ import { t } from "../i18n.js";
 export class NetNameMonitor {
   #netlist;
   #notifications;
+  #namesOf;
 
   /**
    * @param {import('./netlist-cache.js').NetlistCache} netlistCache
    * @param {import('./notification-stack.js').NotificationStack} notifications
+   * @param {() => number} [nameCount] - how many net names the desk holds.
+   *   A merge needs two, and asking the netlist for its conflicts rebuilt it
+   *   after every edit (8–17 ms on a big desk) on desks that name nothing.
    */
-  constructor(netlistCache, notifications) {
+  constructor(netlistCache, notifications, nameCount = null) {
     this.#netlist = netlistCache;
     this.#notifications = notifications;
+    this.#namesOf = nameCount;
     window.addEventListener("chiphippo:doc-changed", () => this.check());
     window.addEventListener("chiphippo:part-state", () => this.check());
   }
 
   /** Toast every current name-merge conflict from the shared netlist. */
   check() {
+    if (this.#namesOf && this.#namesOf() < 2) return;
     const { nameConflicts } = this.#netlist.get();
     for (const c of nameConflicts) {
       this.#notifications.notify({
