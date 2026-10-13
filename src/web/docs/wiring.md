@@ -6,7 +6,8 @@ tool is click-click (no drag-to-draw), every wire remembers the two
 *addresses* it connects rather than raw screen positions, and a bus lets you
 lay a whole marching group of wires — a data or address bus — as one
 gesture. This page covers the wire tool, colors, cross-board wiring,
-re-routing and deleting a wire, addresses, and buses.
+re-routing and deleting a wire, direct and routed wires, auto-routing,
+addresses, and buses.
 
 ![A chip wired to switches, power rails and LED read-outs](images/wiring.png)
 
@@ -158,6 +159,26 @@ wire gets. It's read when the wire is laid, so changing it never disturbs
 wiring already on the desk. Circuits built by the
 [AI builder](ai-builder.md) always arrive direct, whatever that setting
 says — the builder places holes, not hand-drawn routes.
+
+## Auto-routing every wire
+
+**Auto-route wires** in the toolbar tidies a whole desk in one go: every wire
+becomes a **routed** wire running straight along the board, around the parts
+and clear of the other wires, instead of a fan of curves crossing the chips.
+
+![The 74LS138 decoder bench after Auto-route: the switch, output and LED wires run in tidy right-angled lanes beside the chip instead of curving across it](images/auto-route.png)
+
+It asks first, saying how many wires it will redraw, because it replaces
+every bend placed by hand. To find a clear lane it may also move a lead to
+another hole on the **same connection** — along the same power rail, or
+within the same five-hole strip — so the circuit itself never changes. A wire
+it can't find a path for is left exactly as it was, and the message at the
+end says how many. Bus wires are left to their ribbon.
+
+A large desk can take a few seconds; the message says how far it has got, and
+its **Cancel** button stops it with nothing changed. The whole result is one
+undo step (`Cmd/Ctrl+Z`). Like any other wiring change, it does nothing while
+the circuit is running.
 
 ## Addresses
 

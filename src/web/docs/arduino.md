@@ -128,6 +128,8 @@ A tag is plugged into its hole the way a wire end is — one hole, one lead —
 and deleting the breadboard under a tag sends it back to the card; the Output
 or Input itself is never lost with it.
 
+![A counter running with an Output called Count on the Mock connection: its four numbered tags sit on the QA–QD outputs, its card is at the top right, and the TX lamp in the corner lights as it sends](images/arduino.png)
+
 ### Pins and fields
 
 An element's pins are grouped into **fields**, and each field becomes one
@@ -440,6 +442,8 @@ response.
 Open one by clicking the lamps, with **Open Connection Window** on an Output's
 or Input's right-click menu (it works while the circuit runs), or by picking
 the connection in Settings ▸ Serial I/O and pressing **Open window…**.
+
+![The Mock's connection window: every value the Count Output sent, one line each, with the Log, Data, Protocol and Timestamps filters below and a field for typing a line of log text](images/connection-window.png)
 
 Every line starts with a mark saying what it is:
 

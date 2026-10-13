@@ -96,7 +96,8 @@ tool is click-click (no drag-to-draw), every wire remembers the two
 <em>addresses</em> it connects rather than raw screen positions, and a bus lets you
 lay a whole marching group of wires — a data or address bus — as one
 gesture. This page covers the wire tool, colors, cross-board wiring,
-re-routing and deleting a wire, addresses, and buses.</p>
+re-routing and deleting a wire, direct and routed wires, auto-routing,
+addresses, and buses.</p>
 <p><img src="images/wiring.png" alt="A chip wired to switches, power rails and LED read-outs"></p>
 <h2 id="the-wire-tool">The wire tool</h2>
 <p>Press <code>W</code> (or click <strong>Wire</strong> in the toolbar) to arm the wire tool. With the
@@ -229,6 +230,21 @@ wire gets. It&#39;s read when the wire is laid, so changing it never disturbs
 wiring already on the desk. Circuits built by the
 <a href="ai-builder.html">AI builder</a> always arrive direct, whatever that setting
 says — the builder places holes, not hand-drawn routes.</p>
+<h2 id="auto-routing-every-wire">Auto-routing every wire</h2>
+<p><strong>Auto-route wires</strong> in the toolbar tidies a whole desk in one go: every wire
+becomes a <strong>routed</strong> wire running straight along the board, around the parts
+and clear of the other wires, instead of a fan of curves crossing the chips.</p>
+<p><img src="images/auto-route.png" alt="The 74LS138 decoder bench after Auto-route: the switch, output and LED wires run in tidy right-angled lanes beside the chip instead of curving across it"></p>
+<p>It asks first, saying how many wires it will redraw, because it replaces
+every bend placed by hand. To find a clear lane it may also move a lead to
+another hole on the <strong>same connection</strong> — along the same power rail, or
+within the same five-hole strip — so the circuit itself never changes. A wire
+it can&#39;t find a path for is left exactly as it was, and the message at the
+end says how many. Bus wires are left to their ribbon.</p>
+<p>A large desk can take a few seconds; the message says how far it has got, and
+its <strong>Cancel</strong> button stops it with nothing changed. The whole result is one
+undo step (<code>Cmd/Ctrl+Z</code>). Like any other wiring change, it does nothing while
+the circuit is running.</p>
 <h2 id="addresses">Addresses</h2>
 <p>Wires never store pixel positions — they store <strong>addresses</strong>, the one
 cross-module currency for anything wireable. An address is

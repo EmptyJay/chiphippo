@@ -101,6 +101,8 @@ so KiCad's electrical rules check knows they are supplied. A pin that isn't
 connected to anything gets a no-connect flag. The sheet passes KiCad's
 electrical rules check with nothing to report.
 
+![The 74LS161 counter bench exported to KiCad: one symbol for the chip with every pin, the switches, LEDs and resistors beside it, and every connection made by a net label](images/kicad-export.png)
+
 ### From schematic to circuit board
 
 Every part is given a **footprint** from KiCad's standard libraries:

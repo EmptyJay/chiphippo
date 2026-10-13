@@ -10,6 +10,8 @@ the jumper wires**. Wire something up wrong and it fails the way the real
 circuit would, and you can watch a capacitor charge until it crosses a gate's
 threshold.
 
+![An LM7805 under load in Spice Lite: the 9 V supply reads 311 mA, the electronic load reads 5.00 V, 300 mA and 1.50 W, and a warning says the regulator is burning 1.27 W and wants a heatsink](images/spice-lite.png)
+
 It is called _Spice Lite_ because it is **not SPICE**: there is no
 circuit-wide matrix and no manufacturer models. A plain "74LS00" still needs
 no manufacturer or part choosing. Everything comes from a few shared formulas
