@@ -31,6 +31,12 @@
 // change in a frame averages to exactly what it was — a slow blink still
 // blinks, and a steady desk draws as it always did.
 //
+// A desk with nothing moving publishes only when something changes, so the
+// frame after a switch is thrown averages mostly the time BEFORE it. A frame
+// that shows an average is therefore always followed by one more
+// (SimController's #glowShown), which takes none and shows the lamps as they
+// stand.
+//
 // Brightness is a lamp's `level` under Spice Lite (its current against its
 // datasheet's, spice/lamps.js) while lit, and 1 while lit on the digital
 // engine (sim/junction.js's rule over the levels), 0 while dark.

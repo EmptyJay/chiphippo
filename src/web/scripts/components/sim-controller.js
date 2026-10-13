@@ -387,6 +387,9 @@ export class SimController {
   // junctions for the document snapshot.
   #lamps = new LampAverage();
   #lampJunctions = null; // {doc, list}
+  // The last frame showed a lamp's AVERAGE (#publish's lampGlow): one more
+  // frame is owed, so the picture lands on the lamps as they now stand.
+  #glowShown = false;
   #debugStalled = false; // the stall is the debugger's (a person is reading it)
   #debugDeciding = false; // inside afterTick: what it shows is the debugger's
   #heldInputs = []; // input events made while the debugger held the board
@@ -928,6 +931,11 @@ export class SimController {
       const frame = gate ? this.#lastPublishWall + this.#frameMs - now : 0;
       ms = Math.max(0, due, frame);
     }
+    // A frame that showed a lamp's average is followed by one more, though
+    // nothing falls due (#glowShown).
+    if (this.#glowShown) {
+      ms = Math.min(ms, Math.max(0, this.#lastPublishWall + PUBLISH_MS - now));
+    }
     // A desk whose analog side is still moving (spice/sample.js) is redrawn
     // every PUBLISH_MS though no event falls due: nothing ticks for it — the
     // views read the curves where the sim clock has got to.
@@ -993,6 +1001,8 @@ export class SimController {
     }
     // A desk still moving is redrawn though nothing ticked.
     if (this.#frameAt != null && !this.#owed) this.#sampleOwed = true;
+    // …and so is one whose last frame showed a lamp's average.
+    if (this.#glowShown && !this.#owed) this.#sampleOwed = true;
     if (flush) this.#flushSoon();
     if (this.#mode === TRANSPORT.STOPPED) return;
     this.#meter.record(this.#wall(), this.#simNow());
@@ -2493,6 +2503,15 @@ export class SimController {
       tick && !tick.replay && this.#mode === TRANSPORT.RUNNING && !this.#debugStalled // prettier-ignore
         ? this.#lamps.take(this.#shownAt())
         : null;
+    // An average covers the time since the last frame, and a desk with
+    // nothing moving publishes only when something changes — so the frame
+    // after a switch is thrown is mostly the time BEFORE it, and no frame
+    // follows to correct it: the LED stood showing the state it had left
+    // (lit after the switch opened, dim after it closed). Owe one more frame;
+    // nothing changes within it, so it takes no average and shows the lamps
+    // as they stand.
+    this.#glowShown = lampGlow != null;
+    if (this.#glowShown && this.#batchDepth === 0) this.#arm();
     this.#scope.dispatchEvent(
       new CustomEvent("chiphippo:sim-state", {
         detail: {

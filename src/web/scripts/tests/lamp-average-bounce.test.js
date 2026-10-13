@@ -330,3 +330,63 @@ test("Switch bounce: a slide switch's old throw never re-makes as its new one bo
   sim.stop();
   cap.stop();
 });
+
+/** +5 V through a latching switch, an LED and 330 Ω to ground: what the desk
+    draws of the LED in the LAST frame after each throw (sim-overlay.js's
+    #verdict: the frame's average when it has one, else the tick's lamp). */
+function switchedLed({ spice, bounce = false }) {
+  resetDom();
+  const clock = drivenClock();
+  const b = bench();
+  const s = b.seat("s1", "sw-toggle", "a40");
+  b.vcc(s.get(1));
+  const d = b.seat("d1", "led", "a20", { color: "red" });
+  b.link(s.get(2), d.get(1));
+  const r = b.seat("r1", "resistor", "a30", { ohms: 330 });
+  b.link(d.get(2), r.get(1));
+  b.gnd(r.get(2));
+  const desk = fakeDoc(b.doc);
+  const sim = new SimController({ deskDoc: desk, notifications: { notify() {}, dismiss() {} }, clock }); // prettier-ignore
+  sim.setSpiceLite({ enabled: spice, bounce });
+  const cap = capture();
+  const shown = () => {
+    const state = cap.states.filter((x) => x.running).at(-1);
+    const glow = state.lampGlow?.get("d1");
+    if (glow != null) return glow;
+    if (state.lamps) {
+      const lamp = state.lamps.get("d1");
+      return lamp?.lit ? lamp.level : 0;
+    }
+    const net = (at) => state.netlist.netOfPoint.get(at);
+    const pins = [d.get(1), d.get(2)].map((p) => state.netLevels.get(net(b.at(p)))); // prettier-ignore
+    return pins[0] === "H" && pins[1] === "L" ? 1 : 0;
+  };
+  sim.start();
+  clock.advance(200);
+  const seen = [shown()];
+  for (const on of [true, false, true, false]) {
+    desk.setComponentParams("s1", { on });
+    window.dispatchEvent(new CustomEvent("chiphippo:doc-changed"));
+    // An idle desk: nothing ticks again until the next throw.
+    clock.advance(500);
+    seen.push(shown());
+  }
+  const lit = cap.ticks.map((t) => t.lamps?.get("d1")).find((v) => v?.lit)?.level ?? 1; // prettier-ignore
+  sim.stop();
+  cap.stop();
+  return { seen, lit };
+}
+
+for (const [spice, bounce] of [
+  [false, false],
+  [true, false],
+  [true, true],
+]) {
+  test(`${spice ? "Spice Lite" : "the logic engine"}${bounce ? " with bounce" : ""}: an idle desk's last frame shows each throw of a switch, not the average before it`, () => {
+    const { seen, lit } = switchedLed({ spice, bounce });
+    const want = [0, lit, 0, lit, 0];
+    for (let k = 0; k < want.length; k++) {
+      assert.ok(Math.abs(seen[k] - want[k]) < 1e-6, `${seen.join(", ")} ≠ ${want.join(", ")}`); // prettier-ignore
+    }
+  });
+}

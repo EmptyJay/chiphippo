@@ -1482,7 +1482,8 @@
   },
   "about": {
     "subtitle": "Diseño y simulación de TTL en placa de pruebas",
-    "description": "Diseña y simula circuitos lógicos de la familia 74xx en placas de pruebas virtuales sin soldadura — coloca chips, cables, interruptores, LED y alimentación, y observa cómo la electricidad se estabiliza por cada red.",
+    "description": "Diseña y simula circuitos lógicos en placas de pruebas virtuales sin soldadura — coloca chips, cables, interruptores, LED y alimentación, y observa cómo la electricidad se estabiliza por cada red.",
+    "byline": "Creado por Jason, programado por Claude",
     "support": "Soporte:",
     "versionInfo": "Información de la versión",
     "version": "Versión",

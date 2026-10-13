@@ -1482,7 +1482,8 @@
   },
   "about": {
     "subtitle": "Progettazione e simulazione TTL su breadboard",
-    "description": "Progetta e simula circuiti logici della famiglia 74xx su breadboard virtuali senza saldature — posiziona chip, fili, interruttori, LED e alimentazione, poi guarda l'elettricità stabilizzarsi in ogni net.",
+    "description": "Progetta e simula circuiti logici su breadboard virtuali senza saldature — posiziona chip, fili, interruttori, LED e alimentazione, poi guarda l'elettricità stabilizzarsi in ogni net.",
+    "byline": "Creato da Jason, programmato da Claude",
     "support": "Assistenza:",
     "versionInfo": "Informazioni sulla versione",
     "version": "Versione",

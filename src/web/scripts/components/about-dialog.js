@@ -86,6 +86,7 @@ export class AboutDialog {
         ]),
         el("p", { class: "about-subtitle", text: t("about.subtitle") }),
         el("p", { class: "about-desc", text: t("about.description") }),
+        el("p", { class: "about-byline", text: t("about.byline") }),
         // `target="_blank"` is what routes the click to the OS mail client:
         // main's setWindowOpenHandler passes a mailto: window-open to
         // shell.openExternal, where a bare in-frame navigation would try to

@@ -3464,6 +3464,12 @@ textarea.annotation-editor {
   text-decoration: underline;
 }
 
+.about-byline {
+  margin: var(--space-1) 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-muted);
+}
+
 .about-credit {
   margin: var(--space-1) 0 0;
   font-size: var(--font-size-xs);

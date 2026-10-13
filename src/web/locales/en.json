@@ -1479,7 +1479,8 @@
   },
   "about": {
     "subtitle": "TTL breadboard designer & simulator",
-    "description": "Design and simulate 74xx-family logic circuits on virtual solderless breadboards — place chips, wires, switches, LEDs and power, then watch electricity settle through every net.",
+    "description": "Design and simulate logic circuits on virtual solderless breadboards — place chips, wires, switches, LEDs and power, then watch electricity settle through every net.",
+    "byline": "Created by Jason, coded by Claude",
     "support": "Support:",
     "versionInfo": "Version information",
     "version": "Version",

@@ -1452,7 +1452,8 @@
   },
   "about": {
     "subtitle": "TTL 面包板设计与仿真工具",
-    "description": "在虚拟免焊面包板上设计并仿真 74xx 系列逻辑电路 — 放上芯片、导线、开关、LED 和电源，然后看电流在每个网络中稳定下来。",
+    "description": "在虚拟免焊面包板上设计并仿真逻辑电路 — 放上芯片、导线、开关、LED 和电源，然后看电流在每个网络中稳定下来。",
+    "byline": "由 Jason 创建，Claude 编写",
     "support": "支持：",
     "versionInfo": "版本信息",
     "version": "版本",

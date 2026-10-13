@@ -1482,7 +1482,8 @@
   },
   "about": {
     "subtitle": "Conception et simulation TTL sur platine d'essai",
-    "description": "Conçois et simule des circuits logiques de la famille 74xx sur des platines d'essai virtuelles sans soudure — pose des puces, des fils, des interrupteurs, des LED et l'alimentation, puis regarde l'électricité se stabiliser dans chaque net.",
+    "description": "Conçois et simule des circuits logiques sur des platines d'essai virtuelles sans soudure — pose des puces, des fils, des interrupteurs, des LED et l'alimentation, puis regarde l'électricité se stabiliser dans chaque net.",
+    "byline": "Créé par Jason, codé par Claude",
     "support": "Assistance :",
     "versionInfo": "Informations de version",
     "version": "Version",

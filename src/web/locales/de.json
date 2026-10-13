@@ -1479,7 +1479,8 @@
   },
   "about": {
     "subtitle": "TTL-Steckbrett-Entwurf & -Simulation",
-    "description": "Entwirf und simuliere Logikschaltungen der 74xx-Familie auf virtuellen lötfreien Steckbrettern — setze Chips, Drähte, Schalter, LEDs und Stromversorgung, und sieh zu, wie sich der Strom durch jedes Netz einstellt.",
+    "description": "Entwirf und simuliere Logikschaltungen auf virtuellen lötfreien Steckbrettern — setze Chips, Drähte, Schalter, LEDs und Stromversorgung, und sieh zu, wie sich der Strom durch jedes Netz einstellt.",
+    "byline": "Erstellt von Jason, programmiert von Claude",
     "support": "Support:",
     "versionInfo": "Versionsinformationen",
     "version": "Version",
