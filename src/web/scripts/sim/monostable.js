@@ -362,6 +362,9 @@ export function dualMonostableSilicon({
         }
       : {}),
     readout: sections.map((s, i) => ({ pin: s.q, section: i })),
+    // Each section's pins, as the catalog states them — what an ngspice deck
+    // of this silicon reads (scripts/spice-deck.mjs `monostableBlock`).
+    sections: Object.freeze(sections.map((s) => Object.freeze({ ...s }))),
   });
 }
 

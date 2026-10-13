@@ -38,19 +38,41 @@
 // — a level-1 channel with Vgs = VDD, no new figure in it. A square law is
 // not straight, so it is drawn as chords between CURVE_CORNERS (tenths of
 // the overdrive, finer near the rail — transistors.js re-linearizes a
-// MOSFET's linear region by tenths too), each chord's end a corner. Two lines met 1.7 V from the rail at 5 V, where
-// the channel delivers only 3.1 mA of the lines' 4.2: a capacitor charged
-// too fast mid-ramp, the B ngspice graded (features/done/spice-lite-3-plan.md).
+// MOSFET's linear region by tenths too), each chord's end a corner. Two
+// lines met 1.7 V from the rail at 5 V, where the channel delivers only
+// 3.1 mA of the lines' 4.2: a capacitor charged too fast mid-ramp, the B
+// ngspice graded (features/done/spice-lite-3-plan.md).
+//
+// Or, for a family side that states a `table`, the corners it gives: [d,
+// amps] read off a transistor-level sweep, chords between them, saturated
+// past the last.
 //
 // Each family's numbers are its representative part's, typical at 25 °C:
 //
-//   74LS    SN74LS00 — SDLS025B's schematic puts the HIGH behind a Darlington
-//           (two VBE, 1.4 V) and a 120 Ω collector resistor: VOH = VCC − 1.4 V
-//           less 120 Ω, which is 3.3 V at VCC 4.75 V and 0.4 mA (§6.6: 3.4 V
-//           typ) and shorts at 32 mA at 5.25 V (IOS 20–100 mA). LOW: §6.6
-//           VOL 0.25 V typ at 4 mA, 0.35 V at 8 mA — 0.15 V behind 25 Ω, with
-//           no limit (past IOL a real one is sinking more than it is rated
-//           to, and its VOL climbs faster than this says).
+//   74LS    SN74LS04 — not a line but a TABLE (`table`): the I-V curves of
+//           the sheet's own schematic (SDLS029C p. 4 — the Darlington HIGH
+//           behind its 120 Ω, the Schottky-clamped pull-down with its
+//           squaring network) swept transistor by transistor in ngspice
+//           (scripts/spice-deck.mjs `lsGate`, the models fitted to §6.5:
+//           VOH 3.37 V at −0.4 mA, VOL 0.30 V at 4 mA and 0.35 V at 8 mA,
+//           VCC 4.75 V), read off at the corners where it bends. HIGH: open
+//           at VCC − 0.49 V, a soft knee down to 3.6 V by 0.2 mA (the
+//           Darlington's base-emitter drops, falling with its current), then
+//           ~120 Ω down to ground, where it shorts at 31.8 mA at 5 V (IOS
+//           20–100 mA) — the same curve at every VCC, measured from its open
+//           level (4.75–5.25 V agree within 2 mV). LOW: open at 0.204 V,
+//           ~35 Ω up to 1 mA and ~15 Ω on to 16 mA, flat at 18.5 mA (all the
+//           base drive the pull-down has) from 0.6 to 1.4 V, and then — the
+//           output pushed up past the Darlington's emitter — climbing to
+//           152 mA by 2.8 V: a LOW shorted to VCC smokes. The LOW's
+//           currents follow VCC (`lsLowTable`: swept at 4.75, 5 and 5.25 V,
+//           its open level the same within 0.3 mV — the plateau 16.8, 18.5
+//           and 20.2 mA, a short 135, 152 and 164 mA), between the three
+//           sweeps by straight lines and held at the nearer outside them.
+//           A line could not be both: 3.6 V behind 120 Ω read a 100 kΩ load
+//           0.6 V low and a capacitor charged through 10 kΩ stopped at 3.6 V
+//           where the gate takes it past 4.2 (the C ngspice graded,
+//           2026-10-13).
 //   CD4000  CD4029B (SCHS034C, the Harris scan: "typical output low (sink)
 //           / high (source) current characteristics", Figs. 1 and 3, and the
 //           static characteristics' IOL) — a MOSFET
@@ -59,9 +81,9 @@
 //           resistance: IOL 1 mA typ at VO 0.4 V (5 V), 2.6 mA at 0.5 V
 //           (10 V) — 400 Ω and 190 Ω — and ~200 Ω at 15 V (Fig. 1's slope).
 //           Between the two, the square law they set (a `curve`): an
-//           overdrive of 3.36 / 6.08 / 11.2 V. Below 5 V the saturation current is taken down to nothing at
-//           2 V, a B-series threshold (an assumption: no sheet curve goes
-//           below VGS 5 V).
+//           overdrive of 3.36 / 6.08 / 11.2 V. Below 5 V the saturation
+//           current is taken down to nothing at 2 V, a B-series threshold
+//           (an assumption: no sheet curve goes below VGS 5 V).
 //
 //   MOS     every part in NO family that states no stage of its own — the
 //           memories, the CPUs and the 65xx peripherals, the HD44780 LCD
@@ -120,12 +142,151 @@ const CMOS_ON_OHMS = Object.freeze([
   Object.freeze([15, 200]),
 ]);
 
+/** The 74LS HIGH's open-circuit level below VCC, volts (the header's). */
+const LS_HIGH_DROP_V = 0.49;
+
+/** The 74LS HIGH's corners, [volts below its open level, mA], to 24 mA. */
+// prettier-ignore
+const LS_HIGH_MA = Object.freeze(
+  [
+    [0, 0], [0.0699, 0.001], [0.1263, 0.005], [0.1647, 0.01], [0.2239, 0.02],
+    [0.3715, 0.05], [0.5959, 0.1], [0.7846, 0.15], [0.8379, 0.2],
+    [0.8703, 0.3], [0.8862, 0.4], [0.912, 0.7], [0.9277, 1], [0.9605, 2],
+    [0.9929, 3], [1.0741, 4], [1.3022, 6], [1.5457, 8], [2.5395, 16],
+    [3.5374, 24],
+  ].map((c) => Object.freeze(c)),
+); // prettier-ignore
+
+/** Past its 24 mA corner the HIGH runs on in a line to its short, mA/V. */
+const LS_HIGH_TAIL_MA_PER_V = 8.02;
+
+/** The 74LS HIGH's corners at `vcc`: the table, and its short (the pin at
+    0 V) where the line past 24 mA reaches it — or where the table does, on
+    a supply too low to get that far. */
+function lsHighTable(vcc) {
+  const short = Math.max(vcc - LS_HIGH_DROP_V, 1e-3);
+  const [d0, i0] = LS_HIGH_MA[LS_HIGH_MA.length - 1];
+  const out = LS_HIGH_MA.filter(([d]) => d < short);
+  const amps = short > d0 ? i0 + (short - d0) * LS_HIGH_TAIL_MA_PER_V : interpolate(LS_HIGH_MA, short); // prettier-ignore
+  out.push([short, amps]);
+  return out;
+}
+
+/** The 74LS LOW's open-circuit level, volts (the header's). */
+const LS_LOW_V = 0.2044;
+
+/** The 74LS LOW's corners, volts above its open level — one set for all
+    three sweeps (each within 0.03 mA — or 0.6 % past 25 mA — of its own
+    curve between them) — and its currents there, mA, at VCC 4.75, 5 and
+    5.25 V. */
+// prettier-ignore
+const LS_LOW_D = Object.freeze([
+  0, 0.02, 0.038, 0.056, 0.076, 0.098, 0.132, 0.192, 0.228, 0.26, 0.294,
+  0.336, 0.446, 1.238, 1.286, 1.344, 1.384, 1.424, 1.47, 1.534, 1.632,
+  1.806, 2.3, 2.42, 2.526, 2.618,
+]);
+// prettier-ignore
+const LS_LOW_MA = Object.freeze([
+  [4.75, Object.freeze([
+    0, 0.447, 1.053, 1.866, 2.999, 4.471, 7.036, 11.663, 13.981, 15.434,
+    16.273, 16.648, 16.769, 16.794, 16.889, 17.433, 18.513, 20.458,
+    23.654, 29.262, 39.394, 59.73, 120.773, 131.797, 134.594, 134.723,
+  ])],
+  [5, Object.freeze([
+    0, 0.487, 1.132, 1.991, 3.179, 4.713, 7.384, 12.28, 14.857, 16.605,
+    17.731, 18.292, 18.484, 18.502, 18.567, 18.97, 19.838, 21.55, 24.564,
+    30.057, 40.156, 60.594, 123.653, 138.076, 148.346, 151.99,
+  ])],
+  [5.25, Object.freeze([
+    0, 0.527, 1.21, 2.112, 3.35, 4.94, 7.706, 12.835, 15.637, 17.659,
+    19.099, 19.907, 20.207, 20.223, 20.266, 20.557, 21.235, 22.698, 25.49,
+    30.83, 40.863, 61.351, 125.453, 140.952, 153.929, 163.639,
+  ])],
+]);
+
+/** The 74LS LOW's corners at `vcc`, [volts above its open level, mA]: each
+    corner's current along VCC between the three sweeps, held at the nearer
+    outside them. */
+function lsLowTable(vcc) {
+  const v = Math.min(5.25, Math.max(4.75, Number.isFinite(vcc) ? vcc : 5));
+  const k = v <= 5 ? 0 : 1;
+  const [[v0, from], [v1, to]] = [LS_LOW_MA[k], LS_LOW_MA[k + 1]];
+  const f = (v - v0) / (v1 - v0);
+  return LS_LOW_D.map((d, i) => [d, from[i] + (to[i] - from[i]) * f]);
+}
+
+/**
+ * A 74LS gate's PHASE SPLITTER, part-way on. Its input is a Schottky diode
+ * into the splitter's base (an LS NAND one per input, the lowest winning),
+ * so an input held LOW at anything above ground lifts that base, and the
+ * pull-down under the output conducts a little while the output is HIGH: a
+ * current out of the output into GND, set by the input's voltage and by
+ * nothing else (the swept gate, scripts/spice-deck.mjs `lsGate`: the same
+ * to a few nA with the output held anywhere from 1 V to 4 V). It is nothing
+ * at a grounded input, 15 µA at an LS LOW's 0.2 V and 54 µA at 0.4 V — and
+ * so nothing to a load drawing milliamps, but a 10 kΩ charging a capacitor
+ * sees the HIGH's knee 75 mV lower for it (the ring of gates ngspice grades,
+ * spice-golden-cases.js `mixed-ls-rc-ring`, 3.5 % slow without it). Past
+ * 0.8 V (VIL) the gate is switching, and the logic decides; the current is
+ * held there. The gates whose inputs reach the splitter straight are
+ * `SPLITTER_GATES` (`splitterUnits`); an AND, an OR, a NOR, a Schmitt
+ * trigger or anything with logic between its pins and its outputs drives its
+ * splitter from inside, and an open collector has no HIGH to pull on.
+ */
+const SPLITTER_GATES = Object.freeze(new Set(["INV", "NAND"]));
+
+/** A def's units whose outputs carry a splitter's current — a 74LS INV or
+    NAND with its family's totem pole — or none. */
+export function splitterUnits(def) {
+  if (familyOf(def) !== "74LS") return [];
+  if (def.outputStage || def.schmitt || def.openCollector) return [];
+  return (def.logic?.units ?? []).filter((u) => SPLITTER_GATES.has(u.fn));
+}
+
+/** The splitter's current, [volts at the lowest input, µA]: VCC 5 V, and
+    4.75–5.25 V agree within half a microamp. */
+// prettier-ignore
+export const SPLITTER_UA = Object.freeze(
+  [
+    [0, 0], [0.05, 0.45], [0.1, 2.5], [0.15, 7.6], [0.2, 15], [0.25, 23.8],
+    [0.3, 33.3], [0.4, 53.7], [0.5, 74.8], [0.6, 96.4], [0.7, 119.2],
+    [0.75, 134.9], [0.8, 172],
+  ].map((c) => Object.freeze(c)),
+);
+
+/** Below this across the pull-down, volts, it saturates: its current falls
+    to nothing with the output at its GND. */
+export const SPLITTER_SAT_V = 0.2;
+
+/**
+ * The current, amps, a 74LS gate's output takes to its GND through a
+ * part-way pull-down while it drives HIGH: its lowest input `vin` volts
+ * above its GND, its output `vout`.
+ */
+export function splitterAmps(vin, vout) {
+  if (!(vin > 0) || !(vout > 0)) return 0;
+  const ua = interpolate(SPLITTER_UA, vin);
+  return (ua / 1e6) * Math.min(1, vout / SPLITTER_SAT_V);
+}
+
+/** Which piece `splitterAmps` is on, one fragment ending in `|`. */
+export function splitterPiece(vin, vout) {
+  if (!(vin > 0) || !(vout > 0)) return "0|";
+  let k = 0;
+  while (k < SPLITTER_UA.length - 1 && vin >= SPLITTER_UA[k + 1][0]) k++;
+  return `${String.fromCharCode(97 + k)}${vout < SPLITTER_SAT_V ? "s" : ""}|`;
+}
+
 /**
  * Each family's stage, as functions of the chip's supply: `high` and `low`
- * each `{volts(vcc), ohms(vcc), limitMa(vcc), channel?}` — the open-circuit
- * level, the resistance behind it, the most it delivers (Infinity: no
- * limit), and whether it is a MOSFET CHANNEL: an on transistor that conducts
- * either way. A CMOS LOW is an n-channel to ground, so a node pulled below
+ * each `{volts(vcc), ohms(vcc), limitMa(vcc), channel?, curve?, table?}` —
+ * the open-circuit level, the resistance behind it, the most it delivers
+ * (Infinity: no limit), whether it is a MOSFET CHANNEL, and whether it is
+ * curved: a square law (`curve`) or its own corners (`table(vcc)`, [volts
+ * from the open level, mA]; its last is its limit, and its `ohms` only a
+ * representative slope — what a Newton step is pointed along where it
+ * wants one, spice/network.js `offStageSlope`). A channel is an on
+ * transistor that conducts either way. A CMOS LOW is an n-channel to ground, so a node pulled below
  * ground through a capacitor draws current back up through it, as a HIGH
  * takes current into VDD from a node pushed above it; a 74LS totem pole's
  * Darlington cannot sink and its saturated pull-down cannot source, so its
@@ -136,14 +297,16 @@ const CMOS_ON_OHMS = Object.freeze([
 export const FAMILY_STAGES = Object.freeze({
   "74LS": Object.freeze({
     high: Object.freeze({
-      volts: (vcc) => vcc - 1.4,
+      volts: (vcc) => vcc - LS_HIGH_DROP_V,
       ohms: () => 120,
       limitMa: () => Number.POSITIVE_INFINITY,
+      table: lsHighTable,
     }),
     low: Object.freeze({
-      volts: () => 0.15,
+      volts: () => LS_LOW_V,
       ohms: () => 25,
       limitMa: () => Number.POSITIVE_INFINITY,
+      table: lsLowTable,
     }),
   }),
   CD4000: Object.freeze({
@@ -208,7 +371,9 @@ export function stagesOf(def) {
  * resistance, the most it delivers in AMPS (Infinity: none), whether it
  * pushes current OUT (HIGH) or takes it IN (LOW), and whether it conducts
  * the other way too (a MOSFET channel; a def's own side says so, or takes
- * its family's). Null for anything but H or L.
+ * its family's) — and a curved one's chords: its square law's overdrive
+ * (`vov`) or its table's `corners`, `[d, amps]`. Null for anything but H or
+ * L.
  * @param {object} def - the chip's catalog def
  * @param {number} vcc - the supply the chip sees, volts
  * @param {"H"|"L"} level
@@ -229,11 +394,21 @@ export function outputStage(def, vcc, level, strength = 1) {
   // A def's own limit is a [volts, mA] table, or one number at every supply
   // (Infinity: a stage nothing but its own resistance limits).
   const ownLimit = own?.limitMa;
+  // A table's stage is its own corners, a `scale` moving their currents and
+  // never their volts — while it is the family's: a side stating its own
+  // resistance or limit is some other transistor.
+  const tabled = base.table && own?.ohms == null && ownLimit == null;
+  const corners = tabled
+    ? base.table(vcc).map(([d, ma]) => [d, (ma * scale) / 1000])
+    : null;
   const limitMa =
-    ownLimit == null
-      ? base.limitMa(vcc) * scale
-      : (typeof ownLimit === "number" ? ownLimit : interpolate(ownLimit, vcc)) *
-        (own?.scale ?? 1);
+    corners != null
+      ? corners[corners.length - 1][1] * 1000
+      : ownLimit == null
+        ? base.limitMa(vcc) * scale
+        : (typeof ownLimit === "number"
+            ? ownLimit
+            : interpolate(ownLimit, vcc)) * (own?.scale ?? 1);
   const limit = limitMa / 1000;
   const stage = {
     volts: typeof volts === "function" ? volts(vcc) : volts,
@@ -247,6 +422,7 @@ export function outputStage(def, vcc, level, strength = 1) {
   // stating its own resistance or limit is some other transistor.
   const curved = base.curve && own?.ohms == null && ownLimit == null;
   if (curved && limit > 0 && Number.isFinite(limit)) stage.vov = 2 * ohms * limit; // prettier-ignore
+  if (corners) stage.corners = corners;
   return stage;
 }
 
@@ -260,10 +436,12 @@ export const CURVE_CORNERS = Object.freeze([
   0, 0.0125, 0.025, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1,
 ]);
 
-/** The chords' ends on a curved stage, `[d, amps]` from 0 to its overdrive
-    (the open-circuit level to saturation): ON the square law, but the first,
-    which is on its tangent — so a load that draws little sees R exactly. */
+/** The chords' ends on a curved stage, `[d, amps]` from 0 to saturation:
+    a table's own, or along a square law's overdrive — ON the square law, but
+    the first, which is on its tangent, so a load that draws little sees R
+    exactly. */
 export function stageCorners(stage) {
+  if (stage.corners) return stage.corners;
   return CURVE_CORNERS.map((x, k) => [
     x * stage.vov,
     stage.limit * (k === 1 ? 2 * x : x * (2 - x)),
@@ -274,7 +452,11 @@ export function stageCorners(stage) {
     output per solve and read at every Newton step. */
 const CORNERS = new WeakMap();
 
+/** Whether a stage is drawn as chords: a square law, or a table's. */
+const isCurved = (stage) => stage.vov > 0 || stage.corners != null;
+
 function cornersOf(stage) {
+  if (stage.corners) return stage.corners;
   let corners = CORNERS.get(stage);
   if (!corners) CORNERS.set(stage, (corners = stageCorners(stage)));
   return corners;
@@ -304,7 +486,7 @@ function chordSiemens(corners, k) {
  */
 export function stageDelivers(stage, d) {
   if (!(d > 0)) return 0;
-  if (!stage.vov) return Math.min(stage.limit, d / stage.ohms);
+  if (!isCurved(stage)) return Math.min(stage.limit, d / stage.ohms);
   const corners = cornersOf(stage);
   const k = chordOf(corners, d);
   if (k >= corners.length - 1) return stage.limit;
@@ -314,7 +496,7 @@ export function stageDelivers(stage, d) {
 /** ∂(stageDelivers)/∂d at `d` ≥ 0, siemens: 1/R (or the chord's slope)
     where it is linear, 0 where it is saturated. */
 function deliversSlope(stage, d) {
-  if (!stage.vov) return d / stage.ohms < stage.limit ? 1 / stage.ohms : 0;
+  if (!isCurved(stage)) return d / stage.ohms < stage.limit ? 1 / stage.ohms : 0; // prettier-ignore
   const corners = cornersOf(stage);
   const k = chordOf(corners, d);
   return k >= corners.length - 1 ? 0 : chordSiemens(corners, k);
@@ -357,7 +539,7 @@ export function stagePiece(stage, v) {
   if (!stage.channel && !(d > 0)) return "0";
   const ahead = stage.channel ? d >= 0 : true;
   const along = Math.abs(d);
-  if (stage.vov) {
+  if (isCurved(stage)) {
     const corners = cornersOf(stage);
     const k = chordOf(corners, along);
     if (k >= corners.length - 1) return ahead ? "2" : "3";
@@ -375,7 +557,7 @@ export function stagePiece(stage, v) {
 export function stageKinks(stage) {
   const out = [stage.volts];
   if (!Number.isFinite(stage.limit)) return out;
-  const reach = stage.vov
+  const reach = isCurved(stage)
     ? cornersOf(stage)
         .slice(1)
         .map(([d]) => d)

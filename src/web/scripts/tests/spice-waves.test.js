@@ -35,6 +35,7 @@ import {
   TRAPEZOID_RAMP,
   cyclePhase,
   waveGenerator,
+  waveSwing,
   waveVolts,
 } from "../sim/spice/waves.js";
 import { EdgeSchedule } from "../sim/schedule.js";
@@ -528,4 +529,44 @@ test("the Spice bench driver runs a PWM clock at its pulse width, as the app doe
   }
   assert.ok(highs.length >= 2);
   for (const h of highs) assert.ok(Math.abs(h - 0.0025) < 1e-9, `HIGH for ${h} s`); // prettier-ignore
+});
+
+test("a wave's Amplitude about its Offset, clipped at its supply's rails", () => {
+  // Stored only on a wave, only where set.
+  assert.deepEqual(clockDef.normalizeParams({ hz: 10, wave: "sine", amplitude: 1, offset: 2.5 }), { hz: 10, wave: "sine", amplitude: 1, offset: 2.5 }); // prettier-ignore
+  assert.deepEqual(clockDef.normalizeParams({ hz: 10, wave: "sine", amplitude: -1 }), { hz: 10, wave: "sine" }); // prettier-ignore
+  assert.deepEqual(clockDef.normalizeParams({ hz: 10, wave: "pwm", amplitude: 1 }), { hz: 10, wave: "pwm" }); // prettier-ignore
+  // Unset: the whole supply about half of it — exactly as before.
+  assert.deepEqual(waveSwing({}, 5), { lo: 0, hi: 5, floor: 0, ceil: 5 });
+  for (const wave of ["triangle", "sine", "ramp-up", "trapezoid"]) {
+    for (const phase of [0, 0.1, 0.3, 0.5, 0.7, 0.9]) {
+      assert.equal(waveVolts(wave, phase, waveSwing({}, 5)), waveVolts(wave, phase, 5)); // prettier-ignore
+    }
+  }
+  // 1 V peak to peak about 2.5 V.
+  const small = waveSwing({ amplitude: 1, offset: 2.5 }, 5);
+  assert.equal(waveVolts("triangle", 0, small), 2);
+  assert.equal(waveVolts("triangle", 0.5, small), 3);
+  // 8 V about 2.5 V on 5 V: flat at each rail where it would pass it.
+  const big = waveSwing({ amplitude: 8, offset: 2.5 }, 5);
+  assert.equal(waveVolts("triangle", 0, big), 0);
+  assert.equal(waveVolts("triangle", 0.5, big), 5);
+  // A triangle's rising half (10 Hz, 50 ms) from −1.5 V to 6.5 V: on the
+  // floor until 9.375 ms, then up, reaching the ceiling at 40.625 ms.
+  const timing = { half: 0.05, since: 0 };
+  const g0 = waveGenerator("triangle", L, timing, big, 0);
+  assert.equal(g0.wave, "flat");
+  assert.equal(g0.value, 0);
+  assert.ok(Math.abs(g0.end - 0.009375) < 1e-12, `${g0.end}`);
+  const g1 = waveGenerator("triangle", L, timing, big, 0.01);
+  assert.ok(Math.abs(g1.end - 0.040625) < 1e-12, `${g1.end}`);
+  assert.ok(Math.abs(g1.slope - 160) < 1e-9, "8 V over its 50 ms half");
+  // A sine past its ceiling stands on it until it comes back below.
+  const sine = waveSwing({ amplitude: 9, offset: 3 }, 5);
+  const peak = waveGenerator("sine", H, { half: 0.025, since: 0.025 }, sine, 0.025); // prettier-ignore
+  assert.equal(peak.wave, "flat");
+  assert.equal(peak.value, 5);
+  // mid − amp·cos θ = 5 again where cos θ = −4/9: θ = 2π − acos(−4/9).
+  const back = ((2 * Math.PI - Math.acos(-4 / 9)) / (2 * Math.PI)) * 0.05;
+  assert.ok(Math.abs(peak.end - back) < 1e-12, `${peak.end} vs ${back}`);
 });

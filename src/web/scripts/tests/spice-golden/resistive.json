@@ -1,7 +1,7 @@
 {
   "area": "resistive",
   "title": "Resistive DC",
-  "ngspice": "ngspice-42",
+  "ngspice": "ngspice-44.2",
   "cases": {
     "divider-chain": {
       "reference": "same",

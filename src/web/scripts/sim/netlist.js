@@ -68,7 +68,9 @@ import { UnionFind } from "./union-find.js";
  * @param {{boards:Array, components:Array, wires:Array}} doc
  * @param {Map<string, object>} [partStates] componentId → transient state
  *   (e.g. `{ pressed: true }` for a held button). Switch positions live in
- *   the persisted params, so they need no entry here.
+ *   the persisted params, so they need no entry here. `{ contacts }` is a
+ *   switch caught mid-bounce (SimController, sim/bounce.js): the pin pairs
+ *   it has closed at that instant, whatever its position says.
  * @param {{bridges?: boolean, inductors?: "wire"|"branch"}} [options]
  *   `inductors: "branch"` leaves an inductor with an inductance OUT of the
  *   union (its two leads two nets): Spice Lite's netlist, which carries the
@@ -302,9 +304,12 @@ function partition(doc, partStates, conduct, inductorBranches = false) {
     // but an inductor with an inductance is a BRANCH where the caller asks
     // for one (Spice Lite: the voltage across it is the point).
     const branch = inductorBranches && isInductorBranch(def, comp.params);
+    // A switch caught mid-bounce (sim/bounce.js) states the contacts it has
+    // at that instant (`contacts`), in place of its position's.
+    const state = partStates?.get(comp.id);
     const bridges =
       conduct && def.internalBridges && !branch
-        ? def.internalBridges(comp.params, partStates.get(comp.id))
+        ? (state?.contacts ?? def.internalBridges(comp.params, state))
         : [];
     for (const [a, b] of bridges) {
       const aa = addressOfPin.get(a);

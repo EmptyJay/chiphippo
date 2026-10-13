@@ -392,6 +392,16 @@ paths:
     `glowing` → `desk-viewport--flat-lamps`, which drops the drop-shadow on lit LEDs,
     segments, clock lamps and transistor lamps. Per RUN, not per lamp. Toggling a CSS
     filter re-layers the frame; at speed it was most of the desk's drawing cost.
+  - **A frame shows each LED/segment at its AVERAGE over the frame** (2026-10-13,
+    `sim/lamp-average.js`): `#tickOnce` books every tick's brightness (`lampBrightness`:
+    Spice Lite's lamp `level` while lit, incl. an LCD backlight; the digital engine's
+    junction rule → 1/0, over `lampJunctions`, cached per snapshot) into `LampAverage`, and
+    `#publish` takes the mean over the sim time since the last frame (to `#shownAt()`) as
+    sim-state's `lampGlow` (key → mean) — null when nothing changed in the frame (a steady
+    desk draws exactly as before), when not RUNNING, or for a debugger replay. SimOverlay's
+    `#verdict` lights a glowing key at that level (a burn is still the tick's); the digital
+    engine's verdict `level` is now null (plain lit) unless averaged. A 250 Hz 20 % PWM LED
+    draws at 0.2, in both engines. The halo rule above is unchanged.
   - **Over-voltage damage is run-volatile, and that took work to be true.** `#persistDamage`
     writes `params.damaged` into the DOCUMENT because that is what the pure engine reads
     (`powerStatus`) and a chip that let its smoke out at tick 5 must stay dead at tick 6

@@ -1,7 +1,7 @@
 {
   "area": "mosfet-threshold",
   "title": "MOSFET near threshold",
-  "ngspice": "ngspice-42",
+  "ngspice": "ngspice-44.2",
   "cases": {
     "nmos-threshold-2.5v": {
       "reference": "device",

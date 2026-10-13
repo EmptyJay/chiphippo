@@ -196,7 +196,9 @@ export function createWorkerHost({ scope, post, clock = null }) {
         const nets = tickNets(detail);
         detail = { ...detail, netLevels: only(detail.netLevels, nets), nodeVolts: only(detail.nodeVolts, nets), lamps: detail.lamps ? new Map() : null }; // prettier-ignore
       }
-      if (detail?.netlist) detail = { ...detail, netlist: null };
+      // The main thread has the netlist of every version it sent — except
+      // a bounce's (SimController `#bounceNetlist`), which goes along.
+      if (detail?.netlist && !detail.ownNetlist) detail = { ...detail, netlist: null }; // prettier-ignore
       if (!queue.length) queueMicrotask(flush);
       queue.push({ type, detail });
     });

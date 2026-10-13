@@ -743,8 +743,24 @@ test("clock: hz enum (+manual), isAuto contract, Properties field", () => {
     ["out", "vcc", "gnd"],
   );
   // The Pulse width row carries a function (when it greys), compared apart.
-  const [hzField, waveField, dutyField] = def.properties;
-  assert.equal(def.properties.length, 3);
+  const [hzField, waveField, dutyField, ampField, offsetField] = def.properties;
+  assert.equal(def.properties.length, 5);
+  // A wave's swing: two optional volt fields, Spice Lite's, greyed for a
+  // level.
+  for (const [field, key, label] of [
+    [ampField, "amplitude", "Amplitude"],
+    [offsetField, "offset", "Offset"],
+  ]) {
+    // prettier-ignore
+    assert.equal(field.key, key);
+    assert.equal(field.label, label);
+    assert.equal(field.type, "combo");
+    assert.equal(field.unit, "volt");
+    assert.equal(field.optional, true);
+    assert.equal(field.spiceOnly, true);
+    assert.equal(field.disabledWhen({ hz: 10, wave: "pwm" }), true);
+    assert.equal(field.disabledWhen({ hz: 10, wave: "sine" }), false);
+  }
   assert.deepEqual(
     [hzField, waveField],
     [

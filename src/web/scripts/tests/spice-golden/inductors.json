@@ -1,7 +1,7 @@
 {
   "area": "inductors",
   "title": "Inductors",
-  "ngspice": "ngspice-42",
+  "ngspice": "ngspice-44.2",
   "cases": {
     "rl-step": {
       "reference": "same",
@@ -37,8 +37,8 @@
         "collector@0.02002/V": 40.0427165,
         "collector@0.02005/V": 40.0311436,
         "collector@0.0201/V": 40.0125878,
-        "l1@0.02002/A": 0.0427164799,
-        "l1@0.02005/A": 0.031143635,
+        "l1@0.02002/A": 0.04271648,
+        "l1@0.02005/A": 0.0311436351,
         "l1@0.0201/A": 0.0125877702
       }
     },

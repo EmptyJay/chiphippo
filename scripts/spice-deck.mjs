@@ -41,12 +41,22 @@
 //             MOSFET pair its B-series figures set, per supply
 //             (`cmosChannel`). It grades the MODELS. Logic, thresholds and the 555's internals stay as the
 //             engine states them: there is no device model of a comparator.
+//             Except a 74LS gate (an inverter or a NAND): that is its
+//             datasheet schematic, transistor by transistor (`lsGate`), so
+//             its input current, its threshold and both output levels are
+//             the circuit's own.
 //
 // A chip is a small library of behavioural blocks (`chipBlock`): a gate's
-// unit (INV, NAND, …; a Schmitt input's hysteresis), and the NE555 as its
+// unit (INV, NAND, …; a Schmitt input's hysteresis), the NE555 as its
 // silicon (spice/silicon.js) — its divider, its comparators, its latch and its
-// discharge transistor. Anything else throws `unsupported`, so a case can
-// never silently compare against half a circuit.
+// discharge transistor — and a ULN2003A as its channels' Darlingtons. The
+// bench parts (an optocoupler, an op-amp, a regulator, an electronic load)
+// are their laws (spice/analog-devices.js) as B-sources in either flavour:
+// no maker publishes a model of them to grade the law against, so a case
+// grades the SOLVE on them (`benchBlock`). A clock brick putting out a wave
+// is the ideal source Spice Lite makes it (`waveSource`). Anything else
+// throws `unsupported`, so a case can never silently compare against half a
+// circuit.
 
 import { buildNetlist } from "../src/web/scripts/sim/netlist.js";
 import { partDef } from "../src/web/scripts/catalog/index.js";
@@ -64,7 +74,10 @@ import {
   stageStrength,
 } from "../src/web/scripts/sim/spice/params.js";
 import {
+  SPLITTER_SAT_V,
+  SPLITTER_UA,
   outputStage,
+  splitterUnits,
   stageCorners,
 } from "../src/web/scripts/sim/spice/output-stage.js";
 import { normalizeSpiceConfig } from "../src/web/scripts/sim/spice/config.js";
@@ -74,8 +87,23 @@ import {
 } from "../src/web/scripts/sim/spice/silicon.js";
 import { RESET_VOLTS } from "../src/web/scripts/sim/timer-555.js";
 import { inductorTopology } from "../src/web/scripts/sim/spice/inductors.js";
-import { BREAKDOWN_OHMS } from "../src/web/scripts/sim/spice/transistors.js";
 import { transistorModelFor } from "../src/web/scripts/sim/spice/transistor-figures.js";
+import {
+  ARRAY_MODELS,
+  BREAKDOWN_OHMS,
+} from "../src/web/scripts/sim/spice/transistors.js";
+import {
+  LOAD_RON,
+  OPTO,
+  OPTO_TRANSFER,
+} from "../src/web/scripts/sim/spice/analog-devices.js";
+import { benchDevices } from "../src/web/scripts/sim/spice/bench-parts.js";
+import { LEVEL_WAVES } from "../src/web/scripts/catalog/parts.js";
+import {
+  TRAPEZOID_RAMP,
+  waveSwing,
+} from "../src/web/scripts/sim/spice/waves.js";
+import { clockHalves } from "../src/web/scripts/sim/schedule.js";
 import {
   transistorCustom,
   transistorGrade,
@@ -98,7 +126,54 @@ export const DEVICE_MODELS = Object.freeze({
     "PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf=180.7 Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2.5 Cjc=9.728p Mjc=.5776 Vjc=.75 Fc=.5 Cje=8.063p Mje=.3677 Vje=.75 Tr=33.42n Tf=179.3p Itf=.4 Vtf=4 Xtf=6 Rb=10)",
   Q2N2907A:
     "PNP(Is=650.6E-18 Xti=3 Eg=1.11 Vaf=115.7 Bf=231.7 Ne=1.829 Ise=54.81f Ikf=1.079 Xtb=1.5 Br=3.563 Nc=2 Isc=0 Ikr=0 Rc=.715 Cjc=14.76p Mjc=.5383 Vjc=.75 Fc=.5 Cje=19.82p Mje=.3357 Vje=.75 Tr=111.3n Tf=603.7p Itf=.65 Vtf=5 Xtf=1.7 Rb=10)",
+  // A 74LS gate's own devices (`lsGate`) — no maker publishes a card for a
+  // transistor inside a chip, so these are FITTED: plain integrated-circuit
+  // figures, tuned until the schematic below lands on the sheet's typicals
+  // at VCC = 4.75 V (SN74LS04, SDLS029C): VOH 3.37 V at −0.4 mA (typ 3.4),
+  // VOL 0.30 V at 4 mA (typ 0.25) and 0.35 V at 8 mA (typ 0.35), IIL
+  // −0.18 mA at 0.4 V (max −0.4), switching at about 0.94 V.
+  QLS: "NPN(IS=5e-16 BF=60 BR=1 RB=30 RC=10)",
+  QLSO: "NPN(IS=1.5e-15 BF=60 BR=1 RB=10 RC=5 RE=6)",
+  DLS: "D(IS=1e-11 N=1.05 RS=10)",
 });
+
+/**
+ * A 74LS gate as its transistors: SN74LS04's "schematics (each gate)"
+ * (SDLS029C p. 4), every input a Schottky diode into the phase splitter's
+ * base (an LS NAND is the same circuit with one diode per input — DTL), with
+ * its own clamp to ground. Every Schottky-clamped transistor is an NPN with a
+ * Schottky diode base → collector; the Darlington's upper transistor is not
+ * clamped (it never saturates). Ports: the inputs, then Y, VCC, GND.
+ */
+function lsGate(inputs) {
+  const ins = Array.from({ length: inputs }, (_, k) => `A${k + 1}`);
+  return [
+    `.subckt LSGATE${inputs} ${ins.join(" ")} Y VCC GND`,
+    "R20 VCC B1 20k",
+    ...ins.flatMap((a) => [`DI${a} B1 ${a} DLS`, `DC${a} GND ${a} DLS`]),
+    "R12 B1 E1 12k",
+    "Q1 C1 B1 E1 QLS",
+    "DQ1 B1 C1 DLS",
+    "R8 VCC C1 8k",
+    "Q3 C3 C1 E3 QLS",
+    "DQ3 C1 C3 DLS",
+    "R120 VCC C3 120",
+    "DSP E3 C1 DLS",
+    "Q4 C3 E3 Y QLSO",
+    "R4 E3 Y 4k",
+    "DYC Y C1 DLS",
+    "Q5 Y E1 GND QLSO",
+    "DQ5 E1 Y DLS",
+    "R15 E1 B6 1.5k",
+    "R3 E1 C6 3k",
+    "Q6 C6 B6 GND QLS",
+    "DQ6 B6 C6 DLS",
+    ".ends",
+  ];
+}
+
+/** The gates `lsGate` draws: an inverter is its one-input NAND. */
+const LS_GATES = Object.freeze({ INV: 1, NAND: null });
 
 /** Which device model each part kind takes in the "device" flavour, unless a
     case names another (`opts.models`, by component id): the diode's vendor
@@ -162,7 +237,7 @@ const num = (x) => {
 /** The current a stage (spice/output-stage.js's shape) puts INTO a node at
     `v` (an expression), as an expression. */
 export function stageExpr(st, v) {
-  if (st.vov) return curveExpr(st, v);
+  if (st.vov || st.corners) return curveExpr(st, v);
   const lim = Number.isFinite(st.limit) ? num(st.limit) : null;
   const ohms = num(st.ohms);
   const volts = num(st.volts);
@@ -199,6 +274,18 @@ function curveExpr(st, v) {
   return st.sources || st.channel ? amps : `-(${amps})`;
 }
 
+/** A 74LS splitter's current (spice/output-stage.js `splitterAmps`) for
+    inputs at `ins` and its output at `out` (expressions), as an expression:
+    the lowest input along its table, flat past both ends, falling to
+    nothing below SPLITTER_SAT_V on the output. */
+function splitterExpr(ins, out) {
+  const low = ins.reduce((a, b) => `min(${a},${b})`);
+  const ends = SPLITTER_UA[SPLITTER_UA.length - 1];
+  const points = [[-CURVE_END_V, 0], ...SPLITTER_UA, [CURVE_END_V, ends[1]]];
+  const table = points.map(([x, ua]) => `${num(x)},${num(ua / 1e6)}`).join(",");
+  return `pwl(${low},${table})*min(1,max(0,(${out})/${num(SPLITTER_SAT_V)}))`;
+}
+
 /** A CD4000 output's level-1 transistor (`"pmos"` its HIGH, `"nmos"` its
     LOW) as the figures `gradeCard` writes: the square law its stage is,
     driven at VGS = VDD — VTO = VDD − vov, KP = 2·limit / vov². */
@@ -217,6 +304,53 @@ function prevLevel(steps, at) {
   let level = steps[0][1];
   for (const [t, lv] of steps) if (t < at) level = lv;
   return level;
+}
+
+/**
+ * A clock brick's wave (spice/waves.js `waveVolts`) as an ngspice source
+ * spec: from Run, LOW half first, each half `half` seconds, swinging `lo` to
+ * `hi` (`waveSwing`) — a SIN for the sine (its centre less half its swing
+ * times cos 2πft), else a PWL through every corner to `stop`, a sawtooth's
+ * drop one edge (`FLAG_EDGE_S`) long. (Clipped at the rails by its caller.)
+ */
+function waveSource(wave, half, { lo, hi }, stop) {
+  const period = 2 * half;
+  const span = hi - lo;
+  if (wave === "sine") {
+    return `SIN(${num((lo + hi) / 2)} ${num(span / 2)} ${num(1 / period)} 0 0 -90)`; // prettier-ignore
+  }
+  const r = TRAPEZOID_RAMP;
+  // Each period's corners, [phase, shape 0…1], from its start.
+  const corners = {
+    triangle: [
+      [0, 0],
+      [0.5, 1],
+    ],
+    trapezoid: [
+      [0, 0],
+      [0.5 - r, 0],
+      [0.5, 1],
+      [1 - r, 1],
+    ],
+    "ramp-up": [
+      [0, 0],
+      [1, 1, true],
+    ],
+    "ramp-down": [
+      [0, 1],
+      [1, 0, true],
+    ],
+  }[wave];
+  if (!corners) throw new Unsupported(`a ${wave} clock has no wave source`);
+  // Every period that begins before `stop`, and the one after: a PWL holds
+  // its last value past its last point.
+  const points = [];
+  for (let k = 0; k * period <= stop + period; k++) {
+    for (const [phase, shape, edge] of corners) {
+      points.push([(k + phase) * period - (edge ? FLAG_EDGE_S : 0), lo + span * shape]); // prettier-ignore
+    }
+  }
+  return `PWL(${points.map(([t, v]) => `${num(t)} ${num(v)}`).join(" ")})`;
 }
 
 /** An error a case can recognise: the deck has no block for this part. */
@@ -284,6 +418,8 @@ export function spiceDeck(doc, opts) {
   // A CD4000 output's transistor at its supply and strength: one card per
   // distinct set of figures.
   const channelCards = new Map();
+  // The transistor-level 74LS gates the deck uses, by input count.
+  const subckts = new Map();
   const channelModel = (type, st, vcc) => {
     const m = cmosChannel(st, vcc);
     const card = gradeCard(type, m);
@@ -395,6 +531,35 @@ export function spiceDeck(doc, opts) {
     lines.push(`VF${sig.id} ${node(net)} 0 PWL(${pwl})`);
   }
 
+  // ── Clock bricks putting out a wave: ideal sources ────────────────────
+  // (spice/engine.js: a wave holds its net, 0 V to its own supply.) A
+  // square or a PWM is a level, driven like an output: no block.
+  const clockDef = partDef("clock");
+  const stop = analysis.tran?.stop ?? 0;
+  for (const clk of (doc.components ?? []).filter((c) => c.kind === "clock")) {
+    const out = netOf(formatAddress(clk.id, "out"));
+    if (!out) continue;
+    const wave = clockDef.waveOf(clk.params);
+    if (LEVEL_WAVES.includes(wave) || !clockDef.isAuto(clk.params)) {
+      throw new Unsupported(`${clk.id}: a ${wave} clock has no source`);
+    }
+    const high = plusVolts.get(netOf(formatAddress(clk.id, "vcc")));
+    const gnd = netOf(formatAddress(clk.id, "gnd"));
+    if (!(high > 0) || names.get(gnd) !== "0") {
+      throw new Unsupported(`${clk.id}: only a clock across a supply's rails`);
+    }
+    const { low } = clockHalves(clk.params.hz, clockDef.dutyOf(clk.params));
+    const swing = waveSwing(clk.params, high);
+    if (swing.lo >= swing.floor && swing.hi <= swing.ceil) {
+      lines.push(`VK${clk.id} ${node(out)} 0 ${waveSource(wave, low, swing, stop)}`); // prettier-ignore
+    } else {
+      // Past a rail: the wave as set, clipped at the rails.
+      const raw = fresh("k");
+      lines.push(`VK${clk.id} ${raw} 0 ${waveSource(wave, low, swing, stop)}`); // prettier-ignore
+      lines.push(`BK${clk.id} ${node(out)} 0 V=max(${num(swing.floor)},min(${num(swing.ceil)},V(${raw})))`); // prettier-ignore
+    }
+  }
+
   // ── Transistors and chips ─────────────────────────────────────────────
   // How many leads each net holds — every part's pins and every wire's ends:
   // a net with only one chip pin in it reaches nothing.
@@ -426,7 +591,64 @@ export function spiceDeck(doc, opts) {
       continue;
     }
     if (!raw.logic && !raw.silicon) continue; // passives, LEDs: above
+    if (raw.optocoupler || raw.opAmps) continue; // `benchBlock`, below
     lines.push(...chipBlock(comp, siliconOf(raw), pinNets(comp)));
+  }
+  for (const br of benchDevices(doc, netlist)) lines.push(...benchBlock(br));
+
+  /** A bench device (spice/analog-devices.js `analogCurrents`) as
+      B-sources: each `B a b I=…` carries its current from a through it to
+      b. */
+  function benchBlock(br) {
+    const id = br.key.replace(/[^A-Za-z0-9]/g, "_");
+    const v = (net) => `V(${node(net)})`;
+    const clamp = (x, lo, hi) => `min(${hi},max(${lo},${x}))`;
+    if (br.kind === "o") {
+      // Its LED, the junction table; its phototransistor CTR × IF along its
+      // transfer (`OPTO_TRANSFER`, IF itself past its last corner), never
+      // past its saturation (`OPTO`: nothing below its knee, then RSAT).
+      const vd = `V(${node(br.a)},${node(br.k)})`;
+      const t = br.spec.table;
+      const points = [...t.v].map((x, k) => `${num(x)},${num(t.i[k])}`).join(","); // prettier-ignore
+      const led = `(${vd}>0?max(0,pwl(${vd},${points})):0)`;
+      const vce = `V(${node(br.c)},${node(br.e)})`;
+      const sat = `(max(0,${vce}-${num(OPTO.kneeV)})/${num(OPTO.rsatOhm)})`;
+      const transfer = [...OPTO_TRANSFER, [CURVE_END_V, CURVE_END_V]].map(([i, g]) => `${num(i)},${num(g)}`).join(","); // prettier-ignore
+      return [
+        `BOL${id} ${node(br.a)} ${node(br.k)} I=${led}`,
+        `BOC${id} ${node(br.c)} ${node(br.e)} I=(${vce}>0?min(${num(br.ctr)}*pwl(${led},${transfer}),${sat}):0)`, // prettier-ignore
+      ];
+    }
+    if (br.kind === "a") {
+      // Its gain about the middle of its swing, clamped to the swing, behind
+      // its output resistance and its two current limits.
+      const m = br.amp;
+      const lo = `(${v(br.gnd)}+${num(m.lowV)})`;
+      const hi = `max(${lo},${v(br.vcc)}-${num(m.headroomV)})`;
+      const level = clamp(`(${lo}+${hi})/2+${num(m.gain)}*(${v(br.inp)}-${v(br.inn)})`, lo, hi); // prettier-ignore
+      const i = clamp(`(${level}-${v(br.out)})/${num(m.rOut)}`, `-${num(m.sinkA)}`, num(m.sourceA)); // prettier-ignore
+      return [
+        `BAS${id} ${node(br.vcc)} ${node(br.out)} I=max(0,${i})`,
+        `BAK${id} ${node(br.out)} ${node(br.gnd)} I=max(0,-(${i}))`,
+      ];
+    }
+    if (br.kind === "g") {
+      // OUT held its reference above REF behind its output resistance,
+      // never above IN less its dropout, sourced only, to its limit; its
+      // quiescent current IN → REF.
+      const r = br.reg;
+      const target = `min(${v(br.ref)}+${num(r.vref)},${v(br.inp)}-${num(r.dropoutV)})`; // prettier-ignore
+      const i = clamp(`(${target}-${v(br.out)})/${num(r.rOut)}`, 0, num(r.limitA)); // prettier-ignore
+      return [
+        `BGO${id} ${node(br.inp)} ${node(br.out)} I=${i}`,
+        `BGQ${id} ${node(br.inp)} ${node(br.ref)} I=${num(r.quiescentA)}`,
+      ];
+    }
+    // An electronic load: constant current (V / RON until its setting) or
+    // constant resistance, sinking only.
+    const vl = `V(${node(br.pos)},${node(br.neg)})`;
+    const amps = br.mode === "cr" ? (br.ohms > 0 ? `max(0,${vl})/${num(br.ohms)}` : "0") : `min(${num(br.amps)},max(0,${vl})/${num(LOAD_RON)})`; // prettier-ignore
+    return [`BE${id} ${node(br.pos)} ${node(br.neg)} I=${amps}`];
   }
 
   function transistor(comp, type, nets) {
@@ -520,6 +742,7 @@ export function spiceDeck(doc, opts) {
   function chipBlock(comp, def, nets) {
     const out = [];
     const id = comp.id;
+    if (def.bipolarArray) return arrayBlock(comp, def, nets);
     const vccPin = def.pins.find((p) => p.role === "vcc")?.n;
     const vcc = plusVolts.get(nets.get(vccPin));
     const grounded = def.pins
@@ -623,11 +846,131 @@ export function spiceDeck(doc, opts) {
       return out;
     }
 
+    // The package's own resistors (a monostable's CX tied to VSS inside).
+    for (const [k, r] of (def.logic?.internals?.resistors ?? []).entries()) {
+      const end = (x) => (typeof x === "number" ? (nets.get(x) ? pin(x) : null) : node(internalNet(id, x))); // prettier-ignore
+      const [a, b] = [end(r.a), end(r.b)];
+      if (a && b && a !== b) out.push(`RI${id}_${k} ${a} ${b} ${num(r.ohms)}`);
+    }
+    // An output of a timing part, driven from a state (an expression 0…1)
+    // after the part's gate delay, when it reaches anything.
+    const output = (n, expr, stem) => {
+      if (!reaches(nets.get(n), comp.id)) return;
+      drive(n, follow(expr, stem));
+    };
+    // A memory bit: `set` and `clear` (expressions, true/false), else it
+    // holds — regenerative, settling in the part's gate delay.
+    const memory = (set, clear) => {
+      const q = fresh("m");
+      const raw = `${q}r`;
+      out.push(`B${raw} ${raw} 0 V=(${set})?1:((${clear})?0:(V(${q})>0.5?1:0))`); // prettier-ignore
+      out.push(`R${raw} ${raw} ${q} 1k`);
+      out.push(`C${raw} ${q} 0 ${num(delay / Math.LN2 / 1e3)}`);
+      return `V(${q})`;
+    };
+    const th = inputThresholds(config, def, vcc);
+    const readPin = (n) => {
+      loadInput(n);
+      return reading(v(n), th.up, th.down);
+    };
+
+    if (comp.ref === "CD4060B" || comp.ref === "CD4541B") {
+      // An RC oscillator's two inverters (sim/ripple-oscillator.js,
+      // sim/programmable-timer.js silicon): the input pin read at its
+      // threshold, the output in phase with it and its complement — φO and
+      // φ̄O, CTC and RTC — which Fig. 12 / Fig. 2's Cx, Rx and Rs close into
+      // an oscillator. Running: a 4060's RESET LOW, a 4541's MR LOW with AR
+      // LOW (its power-on reset released at Run).
+      const [IN, SAME, OPP, HOLD] = comp.ref === "CD4060B" ? [11, 9, 10, 12] : [3, 2, 1, 6]; // prettier-ignore
+      if (comp.ref === "CD4541B") loadInput(5);
+      const held = readPin(HOLD);
+      const x = readPin(IN);
+      // Held (a 4060's RESET or a 4541's MR HIGH): the in-phase output LOW.
+      const same = `(${held}>0.5?0:${x})`;
+      output(SAME, same, "y");
+      output(OPP, `(1-${same})`, "y");
+      return out;
+    }
+
+    if (comp.ref === "CD4047B") {
+      // sim/monostable.js `cd4047Silicon`, astable only: RC COMMON read at
+      // ½·VDD, C (and OSC OUT) in phase with it, R against it, Q toggled on
+      // each rise of the oscillator (FF4: a master–slave pair).
+      const P = { C: 1, R: 2, RC: 3, AN: 4, A: 5, RESET: 9, Q: 10, QN: 11, OSC: 13 }; // prettier-ignore
+      const astable = `(1-(1-${readPin(P.A)})*${readPin(P.AN)})`;
+      const reset = readPin(P.RESET);
+      loadInput(P.RC);
+      const up = def.logic.sense[P.RC].up(vcc);
+      const osc = `(${astable}*${reading(v(P.RC), up, up)})`;
+      const m = fresh("m");
+      const q = fresh("m");
+      for (const [name, expr] of [
+        [m, `${osc}<0.5?(V(${q})>0.5?0:1):(V(${m})>0.5?1:0)`],
+        [q, `${reset}>0.5?0:(${osc}>0.5?(V(${m})>0.5?1:0):(V(${q})>0.5?1:0))`],
+      ]) {
+        out.push(`B${name}r ${name}r 0 V=${expr}`);
+        out.push(`R${name}r ${name}r ${name} 1k`);
+        out.push(`C${name}r ${name} 0 ${num(delay / Math.LN2 / 1e3)}`);
+      }
+      output(P.C, osc, "y");
+      output(P.R, `(1-${osc})`, "y");
+      output(P.OSC, osc, "y");
+      output(P.Q, `V(${q})`, "y");
+      output(P.QN, `(1-V(${q}))`, "y");
+      return out;
+    }
+
+    if (def.logic?.sections) {
+      // A dual monostable's silicon (sim/monostable.js
+      // `dualMonostableSilicon`): a trigger edge (+TR rising or −TR
+      // falling) turns the discharge on and Q HIGH; RX CX emptied below the
+      // lower comparator turns the discharge off; charged back past the
+      // upper, Q falls. RESET LOW holds Q LOW and the discharge on.
+      for (const s of def.logic.sections) {
+        if (!reaches(nets.get(s.q), comp.id) && !reaches(nets.get(s.qn), comp.id)) continue; // prettier-ignore
+        const reset = readPin(s.reset);
+        const trig = `(1-(1-${readPin(s.plus)})*${readPin(s.minus)})`;
+        // The trigger a gate delay ago: its edge is where the two differ.
+        const was = `V(${follow(trig, "w")})`;
+        const edge = `(${trig}>0.5&&${was}<0.5)`;
+        const sense = def.logic.sense[s.rxcx];
+        const high = reading(v(s.rxcx), sense.up(vcc), sense.up(vcc));
+        const low = reading(v(s.rxcx), sense.down(vcc), sense.down(vcc));
+        loadInput(s.rxcx);
+        const dis = memory(`${reset}<0.5||${edge}`, `${low}<0.5`);
+        const q = memory(`${reset}>0.5&&${edge}`, `${reset}<0.5||(${dis}<0.5&&${high}>0.5)`); // prettier-ignore
+        const lo = def.logic.stages[s.rxcx](vcc, "L");
+        out.push(`B${fresh("d")} 0 ${pin(s.rxcx)} I=(${dis}>0.5?1:0)*(${stageExpr(lo, v(s.rxcx))})`); // prettier-ignore
+        output(s.q, q, "y");
+        output(s.qn, `(1-${q})`, "y");
+      }
+      return out;
+    }
+
     const units = def.logic?.units;
+    if (device && family === "74LS") {
+      // The gate's own transistors (`lsGate`): its inputs load themselves and
+      // its output is the totem pole, so neither the engine's stages nor its
+      // thresholds take part.
+      if (!units?.length || units.some((u) => !(u.fn in LS_GATES))) {
+        throw new Unsupported(`${comp.ref}: no transistor-level gate`);
+      }
+      for (const u of units) {
+        if (!reaches(nets.get(u.output), comp.id)) continue;
+        const ins = u.inputs.map((n) => {
+          if (!nets.get(n)) throw new Unsupported(`${id}: pin ${n} floats`);
+          return pin(n);
+        });
+        for (const name of ["QLS", "QLSO", "DLS"]) modelOf(name);
+        subckts.set(ins.length, lsGate(ins.length));
+        out.push(`X${fresh("ls")} ${ins.join(" ")} ${pin(u.output)} ${pin(vccPin)} 0 LSGATE${ins.length}`); // prettier-ignore
+      }
+      return out;
+    }
     if (!units?.length || units.some((u) => !GATES[u.fn])) {
       throw new Unsupported(`${comp.ref}: no behavioural block`);
     }
-    const th = inputThresholds(config, def, vcc);
+    const splitters = new Set(splitterUnits(def));
     for (const u of units) {
       // A unit whose output reaches nothing is left out: a spare gate's
       // inputs float, and its output moves nothing.
@@ -637,8 +980,55 @@ export function spiceDeck(doc, opts) {
         return reading(v(n), th.up, th.down);
       });
       for (const n of u.inputs) loadInput(n);
-      drive(u.output, follow(GATES[u.fn](reads), "y"));
+      const state = follow(GATES[u.fn](reads), "y");
+      drive(u.output, state);
+      // A 74LS splitter part-way on while it drives HIGH (spice/network.js
+      // "t"): out of the output to ground, by its lowest input.
+      if (splitters.has(u)) {
+        out.push(`B${fresh("t")} ${pin(u.output)} 0 I=${level(state)}*(${splitterExpr(u.inputs.map(v), v(u.output))})`); // prettier-ignore
+      }
     }
+    return out;
+  }
+
+  /** An array of transistors on one die (a ULN2003A): each channel's input
+      resistor to its internal base, its Darlington (spice/transistors.js
+      ARRAY_MODELS) from its output to E, and its clamp diode to COM. The
+      Darlington has no behavioural block: the device flavour only, its two
+      transistors their figures' cards, as a discrete Darlington's are. */
+  function arrayBlock(comp, def, nets) {
+    if (!device) throw new Unsupported(`${comp.ref}: a Darlington has no behavioural block`); // prettier-ignore
+    const out = [];
+    const id = comp.id;
+    const m = ARRAY_MODELS[def.bipolarArray];
+    const parts = def.logic.internals;
+    const end = (x) => (typeof x === "number" ? node(nets.get(x)) : node(internalNet(id, x))); // prettier-ignore
+    for (const [k, r] of parts.resistors.entries()) {
+      const [a, b] = [end(r.a), end(r.b)];
+      if (a && b && a !== b) out.push(`RI${id}_${k} ${a} ${b} ${num(r.ohms)}`);
+    }
+    for (const [k, d] of parts.junctions.entries()) {
+      const [a, c] = [end(d.anode), end(d.cathode)];
+      if (a && c && a !== c && reaches(nets.get(d.cathode), id)) {
+        out.push(`DI${id}_${k} ${a} ${c} ${modelOf(DEFAULT_DEVICE.diode)}`);
+      }
+    }
+    const q1 = fit(`Q${def.bipolarArray.toUpperCase()}D`, "npn", m.q1);
+    const q2 = fit(`Q${def.bipolarArray.toUpperCase()}O`, "npn", m.q2);
+    def.logic.channels.forEach((ch, i) => {
+      const [c, e] = [nets.get(ch.a), nets.get(ch.b)];
+      if (!c || !e || c === e || !reaches(c, id)) return;
+      const b = node(internalNet(id, ch.base));
+      const mid = fresh("x");
+      const col = fresh("c");
+      out.push(
+        `RC${id}_${i} ${node(c)} ${col} ${num(m.rcOhm > 0 ? m.rcOhm : 1e-6)}`,
+        `Q${id}_${i}A ${col} ${b} ${mid} ${q1}`,
+        `Q${id}_${i}B ${col} ${mid} ${node(e)} ${q2}`,
+        `RD1${id}_${i} ${b} ${mid} ${num(m.r1Ohm)}`,
+        `RD2${id}_${i} ${mid} ${node(e)} ${num(m.r2Ohm)}`,
+      );
+    });
     return out;
   }
 
@@ -663,6 +1053,7 @@ export function spiceDeck(doc, opts) {
   ];
   const text = ["* chiphippo golden deck", ""];
   for (const name of used) text.push(`.model ${name} ${DEVICE_MODELS[name] ?? fits.get(name)}`); // prettier-ignore
+  for (const sub of subckts.values()) text.push(...sub);
   text.push(...lines);
   // Every node a teraohm to ground — the engine's GMIN — so a node only
   // one-way stages touch (an unloaded 555 OUT above its HIGH level) is held

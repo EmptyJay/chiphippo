@@ -25,6 +25,8 @@
 //     joined right now (Feature 70's netlist consumes this).
 //   - `source(params)` — a PSU's terminal potentials (Feature 90 consumes).
 //   - `normalizeParams(raw)` — coerce arbitrary stored params to valid ones.
+//   - `contactBounce` — a mechanical switch whose closing contacts bounce
+//     (sim/bounce.js), when Settings ▸ Spice Lite asks for it.
 //   - `clickToggle(params, index)` — the params patch ONE plain click makes,
 //     or null when that click changes nothing. Declaring it is ALSO what makes
 //     a part click-toggling at all: the controller asks whether the function is
@@ -161,6 +163,15 @@ function clockDuty(raw) {
   if (!Number.isFinite(duty)) return CLOCK_DUTY_DEFAULT;
   return Math.min(CLOCK_DUTY_MAX, Math.max(CLOCK_DUTY_MIN, Math.round(duty)));
 }
+
+/** What a wave's Amplitude (peak to peak) and Offset (its centre) may be
+    set to, volts: anything a bench supply here reaches. Unset, a wave swings
+    its whole supply about half of it (spice/waves.js `waveSwing`). */
+export const CLOCK_SWING_RANGE = Object.freeze({ min: 0.01, max: 30 });
+
+/** A stored Amplitude or Offset: a positive number of volts, or nothing. */
+const clockSwingValue = (raw) =>
+  typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : null;
 
 /** The wave a clock's params name: its own, while it runs free — a manual
     clock is a switch, and a switch is square. */
@@ -455,6 +466,7 @@ function dipSwitchBankDef(n) {
       "clickable while the simulation runs. Press R with it selected to " +
       "flip it 180° in place, same as a chip.",
     group: "Switches",
+    contactBounce: true,
     // Seats and derives pins with the same footprint machinery every DIP
     // chip uses (footprints.js) — not a chip, though: electrically it's n
     // independent switches.
@@ -631,6 +643,7 @@ export const PART_DEFS = Object.freeze(
         "Single-pole double-throw slide switch — the center pin is common; " +
         "click to flip which side it bridges.",
       group: "Switches",
+      contactBounce: true,
       footprint: Object.freeze({ offsets: Object.freeze([0, 1, 2]) }),
       pins: [
         { n: 1, name: "1", role: "contact" },
@@ -655,6 +668,7 @@ export const PART_DEFS = Object.freeze(
       blurb:
         "Momentary SPST tactile button — bridges its two pins only while held.",
       group: "Switches",
+      contactBounce: true,
       footprint: Object.freeze({ offsets: Object.freeze([0, 2]) }),
       pins: [
         { n: 1, name: "1", role: "contact" },
@@ -675,6 +689,7 @@ export const PART_DEFS = Object.freeze(
         "Latching SPST push button — click to turn on, click again to " +
         "turn off.",
       group: "Switches",
+      contactBounce: true,
       footprint: Object.freeze({ offsets: Object.freeze([0, 2]) }),
       pins: [
         { n: 1, name: "1", role: "contact" },
@@ -1249,7 +1264,9 @@ export const PART_DEFS = Object.freeze(
         "clock pin — its HIGH is that supply's voltage. Unpowered it stops. " +
         "As PWM it is HIGH for its pulse width (1–99 %) of each period. " +
         "Under Spice Lite it can put out a triangle, a trapezoid, a sawtooth " +
-        "or a sine instead, swinging from 0 V to its supply.",
+        "or a sine instead, swinging from 0 V to its supply — or set its " +
+        "Amplitude (peak to peak) and Offset (its centre), clipped at 0 V " +
+        "and its supply.",
       group: "Power",
       size: Object.freeze({ width: 8, height: 5 }),
       // `out` and `gnd` keep the places they always had; the supply terminal
@@ -1297,15 +1314,50 @@ export const PART_DEFS = Object.freeze(
           valuePercent: true,
           disabledWhen: (values) => clockWaveOf(values) !== "pwm",
         },
+        // A wave's swing (Spice Lite's alone, as the waves are): blank, the
+        // whole supply about half of it; greyed for a level.
+        {
+          ...valueField({
+            key: "amplitude",
+            label: "Amplitude",
+            unit: "volt",
+            range: CLOCK_SWING_RANGE,
+            values: [0.1, 0.2, 0.5, 1, 2, 3.3, 5, 9, 12],
+            optional: true,
+          }),
+          spiceOnly: true,
+          disabledWhen: (values) => LEVEL_WAVES.includes(clockWaveOf(values)),
+        },
+        {
+          ...valueField({
+            key: "offset",
+            label: "Offset",
+            unit: "volt",
+            range: CLOCK_SWING_RANGE,
+            values: [0.5, 1, 1.65, 2.5, 4.5, 6, 7.5],
+            optional: true,
+          }),
+          spiceOnly: true,
+          disabledWhen: (values) => LEVEL_WAVES.includes(clockWaveOf(values)),
+        },
       ],
       normalizeParams(raw) {
         const hz = offeredHz(CLOCK_HZ, raw?.hz, 1);
         const wave = CLOCK_WAVES.includes(raw?.wave) ? raw.wave : "square";
         if (wave === "square") return { hz };
         const duty = clockDuty(raw?.duty);
-        return wave === "pwm" && duty !== CLOCK_DUTY_DEFAULT
-          ? { hz, wave, duty }
-          : { hz, wave };
+        if (wave === "pwm") {
+          return duty !== CLOCK_DUTY_DEFAULT ? { hz, wave, duty } : { hz, wave }; // prettier-ignore
+        }
+        // A wave keeps its swing, each only where set.
+        const amplitude = clockSwingValue(raw?.amplitude);
+        const offset = clockSwingValue(raw?.offset);
+        return {
+          hz,
+          wave,
+          ...(amplitude != null ? { amplitude } : {}),
+          ...(offset != null ? { offset } : {}),
+        };
       },
       /** Is this clock free-running (has a rate) rather than manual? */
       isAuto(params) {

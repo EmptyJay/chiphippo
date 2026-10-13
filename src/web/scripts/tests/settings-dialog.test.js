@@ -1238,8 +1238,28 @@ test("SettingsDialog: the Spice Lite tab switches the engine, re-emitting the wh
   // An object-valued setting is replaced whole, so the gap and the family
   // overrides must ride along with the toggle.
   assert.deepEqual(JSON.parse(JSON.stringify(patches)), [
-    { spiceLite: { ...stored, enabled: true } },
+    { spiceLite: { ...stored, enabled: true, bounce: false } },
   ]);
+  PopupManager.close();
+});
+
+test("SettingsDialog: Switch bounce is its own On / Off, off by default", () => {
+  resetDom();
+  const stored = { enabled: true, gapPercent: 1, families: {} };
+  SettingsDialog.open({ spiceLite: stored }, { tab: "spice" });
+  const panel = document.querySelector('.settings-panel[data-panel="spice"]');
+  const patches = [];
+  window.addEventListener("chiphippo:settings-changed", (e) =>
+    patches.push(e.detail),
+  );
+  const pickers = panel.querySelectorAll(".segmented-picker");
+  const bounce = [...pickers].find((p) => p.getAttribute("aria-label") === "Switch bounce"); // prettier-ignore
+  assert.ok(bounce, "a Switch bounce picker");
+  const selected = bounce.querySelector('[aria-checked="true"]');
+  assert.equal(selected?.textContent, "Off");
+  [...bounce.querySelectorAll(".segmented-option")].find((b) => b.textContent === "On").click(); // prettier-ignore
+  assert.equal(patches.at(-1).spiceLite.bounce, true);
+  assert.equal(patches.at(-1).spiceLite.enabled, true, "the rest rides along");
   PopupManager.close();
 });
 
@@ -1317,7 +1337,7 @@ test("Spice Lite: Advanced shows every number at its default, and an edit stores
 
   p.type(p.field("74LS", "delayNs"), "15");
   assert.deepEqual(p.patches.at(-1), {
-    spiceLite: { enabled: true, gapPercent: 1, families: { "74LS": { delayNs: 15 } } }, // prettier-ignore
+    spiceLite: { enabled: true, gapPercent: 1, families: { "74LS": { delayNs: 15 } }, bounce: false }, // prettier-ignore
   });
   assert.equal(reset.disabled, false);
 

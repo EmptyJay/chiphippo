@@ -36,6 +36,8 @@
 //   families    per-family OVERRIDES of the defaults, keyed by family; only
 //               what the user changed is stored, so Reset is deleting a
 //               family's entry
+//   bounce      whether a mechanical switch's closing contacts bounce
+//               (sim/bounce.js) — false unless exactly true
 
 import { LOGIC_FAMILIES } from "../../catalog/families.js";
 import { FAMILY_DEFAULTS } from "./params.js";
@@ -95,6 +97,7 @@ export const DEFAULT_SPICE_CONFIG = Object.freeze({
   enabled: false,
   gapPercent: DEFAULT_GAP_PERCENT,
   families: Object.freeze({}),
+  bounce: false,
 });
 
 const isPlainObject = (v) =>
@@ -130,7 +133,8 @@ function familyOverrides(family, raw) {
  * Coerce whatever `settings.spiceLite` holds into a config.
  * @param {unknown} raw
  * @returns {{enabled: boolean, gapPercent: number,
- *   families: Readonly<Record<string, Readonly<Record<string, number>>>>}}
+ *   families: Readonly<Record<string, Readonly<Record<string, number>>>>,
+ *   bounce: boolean}}
  */
 export function normalizeSpiceConfig(raw) {
   if (!isPlainObject(raw)) return DEFAULT_SPICE_CONFIG;
@@ -147,5 +151,6 @@ export function normalizeSpiceConfig(raw) {
     enabled: raw.enabled === true,
     gapPercent,
     families: Object.freeze(families),
+    bounce: raw.bounce === true,
   });
 }

@@ -132,7 +132,9 @@ export function runner(doc, { engine = "digital", spice = null } = {}) {
     rebuild() {
       netlist = build();
     },
-    run(now, signalLevels = new Map()) {
+    /** A tick at `now`; `clocks` the clock bricks' `{clockPhase,
+        clockTimes}` (as SimController hands them), when the desk has any. */
+    run(now, signalLevels = new Map(), clocks = {}) {
       last = tick({
         document: doc,
         netlist,
@@ -140,6 +142,7 @@ export function runner(doc, { engine = "digital", spice = null } = {}) {
         state,
         prevPinLevels: prev,
         signalLevels,
+        ...clocks,
         now,
         ...(engine === "spice"
           ? { spice: { config: { enabled: true, ...spice }, analog } }

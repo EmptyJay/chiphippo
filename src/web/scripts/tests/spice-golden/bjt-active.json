@@ -1,7 +1,7 @@
 {
   "area": "bjt-active",
   "title": "BJT in its active region",
-  "ngspice": "ngspice-42",
+  "ngspice": "ngspice-44.2",
   "cases": {
     "npn-active-1M": {
       "reference": "device",

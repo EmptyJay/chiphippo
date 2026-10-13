@@ -83,6 +83,9 @@ export class SimOverlay {
   // `c4`, or `c5#a` for a segment), or null when the run is the digital
   // engine's: then the junction rule (sim/junction.js) decides instead.
   #lamps = null;
+  // Each lamp's brightness averaged over the frame (sim/lamp-average.js —
+  // key → mean, 0 dark), or null: the frame shows the tick's own lamps.
+  #glow = null;
   #replay = false; // a debugger replay pass: levels a pass's, lamps the tick's
 
   /**
@@ -124,6 +127,7 @@ export class SimOverlay {
     supplies,
     bench,
     lamps,
+    lampGlow,
     currents,
     fastestHz,
     replay,
@@ -132,6 +136,7 @@ export class SimOverlay {
     this.#replay = running && replay === true;
     this.#glowing = !(running && fastestHz > GLOW_MAX_HZ);
     this.#lamps = running ? (lamps ?? null) : null;
+    this.#glow = running && replay !== true ? (lampGlow ?? null) : null;
     this.#currents = currents ?? new Map();
     this.#supplies = supplies ?? new Map();
     this.#levels = netLevels ?? new Map();
@@ -214,7 +219,8 @@ export class SimOverlay {
    * (stopped, not an LED, or a rotated LED whose far end resolves nowhere).
    * The 3D view (components/desk-3d-view.js) lights its lenses from this, so
    * the junction rule is applied ONCE, here, for both. `level` is how bright
-   * (1 at the LED's datasheet current; Spice Lite's, else 1 while lit).
+   * (1 at the LED's datasheet current: Spice Lite's, or the frame's average
+   * where it changed within the frame — else null, simply lit).
    */
   ledOf(id) {
     return this.#leds.get(id) ?? null;
@@ -349,9 +355,22 @@ export class SimOverlay {
    * One junction's verdict, `{lit, burnt, level}`: Spice Lite's milliamps
    * when the run has them (key `c4` or `c5#a`), else the junction rule. A
    * level is rounded to a twentieth so a current wandering in its last
-   * digits never rewrites a style.
+   * digits never rewrites a style. Where the frame averaged the lamp
+   * (`#glow` — it changed within the frame: a PWM's LED), it is lit at that
+   * average; a burn is still the tick's.
    */
   #verdict(key, anodeAt, cathodeAt) {
+    const glow = this.#glow?.get(key);
+    if (glow != null) {
+      const burnt = this.#lamps
+        ? this.#lamps.get(key)?.burnt === true
+        : this.#junctionState(anodeAt, cathodeAt).unlimited;
+      return {
+        lit: !burnt && glow > 0,
+        burnt,
+        level: Math.round(glow * 20) / 20,
+      };
+    }
     if (this.#lamps) {
       const v = this.#lamps.get(key);
       // The chip debugger replaying a tick pass by pass: the levels are the
@@ -367,8 +386,9 @@ export class SimOverlay {
         level: Math.round((v?.level ?? 0) * 20) / 20,
       };
     }
+    // The digital engine's lamp is simply lit: no level of its own.
     const state = this.#junctionState(anodeAt, cathodeAt);
-    return { lit: isLit(state), burnt: state.unlimited, level: 1 };
+    return { lit: isLit(state), burnt: state.unlimited, level: null };
   }
 
   /**
@@ -408,7 +428,7 @@ export class SimOverlay {
       if (verdict.burnt) this.#burnt.add(comp.id);
       view.setBurnt?.(verdict.burnt);
       view.setLit(verdict.lit);
-      view.setLevel?.(this.#lamps && verdict.lit ? verdict.level : null);
+      view.setLevel?.(verdict.lit ? verdict.level : null);
     }
   }
 
@@ -473,7 +493,7 @@ export class SimOverlay {
         verdicts.set(seg.id, verdict);
         view.setSegmentLit(seg.id, verdict.lit);
         view.setSegmentBurnt?.(seg.id, verdict.burnt);
-        view.setSegmentLevel?.(seg.id, this.#lamps && verdict.lit ? verdict.level : null); // prettier-ignore
+        view.setSegmentLevel?.(seg.id, verdict.lit ? verdict.level : null);
         if (verdict.burnt) anyBurnt = true;
       }
       view.setBurnt?.(anyBurnt);
@@ -508,7 +528,9 @@ export class SimOverlay {
    * no voltage at all (left open) floats up to VDD: blank.
    */
   #lcdPanel(comp, def) {
-    const lamp = this.#lamps.get(junctionKey(comp.id, "backlight"));
+    const key = junctionKey(comp.id, "backlight");
+    const lamp = this.#lamps.get(key);
+    const glow = this.#glow?.get(key);
     const pins = this.#pinsFor(comp);
     const voltsAt = (pin) => {
       const address = pins?.find((p) => p.pin === pin)?.address;
@@ -519,7 +541,7 @@ export class SimOverlay {
     const v0 = voltsAt(def.contrastPin);
     const vlcd = vdd == null || v0 == null ? 0 : vdd - v0;
     return {
-      backlight: lamp?.lit ? Math.min(1, lamp.level) : 0,
+      backlight: Math.min(1, glow ?? (lamp?.lit ? lamp.level : 0)),
       contrast: Math.max(0, Math.min(1, vlcd / LCD_FULL_VOLTS)),
     };
   }

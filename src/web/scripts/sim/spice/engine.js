@@ -259,7 +259,7 @@ import { TIMING_CAP_HZ } from "../timing.js";
 import { partPinAddresses } from "../../model/occupancy.js";
 import { linearBiasWarnings, selfBiasedGates } from "./linear-bias.js";
 import { benchWarnings, TRIP_S } from "./bench-warnings.js";
-import { waveGenerator, waveHeading } from "./waves.js";
+import { waveGenerator, waveHeading, waveSwing } from "./waves.js";
 import { ANALOG_FRAME_S, nextDisplayFrame } from "./sample.js";
 import { islandsOf } from "./islands.js";
 
@@ -663,7 +663,8 @@ function analyze(ctx, config, doc, netlist) {
     const wave = clockDef.waveOf(byId.get(clk.id)?.params);
     // A square or a PWM is a LEVEL, driven like any output.
     if (LEVEL_WAVES.includes(wave)) continue;
-    waves.set(net, { id: clk.id, wave, volts: clk.volts });
+    const { amplitude, offset } = byId.get(clk.id)?.params ?? {};
+    waves.set(net, { id: clk.id, wave, volts: clk.volts, amplitude, offset });
     const had = candidates.get(net);
     candidates.set(net, { caps: had?.caps ?? [], farads: had?.farads ?? 0, wave: clk.id }); // prettier-ignore
   }
@@ -1100,7 +1101,7 @@ export function tick({ spice = null, ...opts }) {
       (a late tick's history on the last tick's, as `settleAt` runs it). */
   const generatorOf = (net, t, inputs = t < target ? before : own) => {
     const w = s.waves.get(net);
-    return waveGenerator(w.wave, inputs.clockPhase.get(w.id), inputs.clockTimes.get(w.id), w.volts ?? s.vHigh, t); // prettier-ignore
+    return waveGenerator(w.wave, inputs.clockPhase.get(w.id), inputs.clockTimes.get(w.id), waveSwing(w, w.volts ?? s.vHigh), t); // prettier-ignore
   };
   // What each wave jumped by at this tick's own moment — its edge, where the
   // bench's inputs change (a sawtooth dropping back) — not yet carried
@@ -1117,14 +1118,15 @@ export function tick({ spice = null, ...opts }) {
       const gen = generatorOf(net, t);
       if (t >= target && !jumped.has(net)) {
         jumped.add(net);
-        // Where the wave stood just before: the last tick's SHAPE when the
-        // edit changed it (a triangle switched to a ramp jumps by the gap).
+        // Where the wave stood just before: the last tick's SHAPE and SWING
+        // when an edit changed them (a triangle switched to a ramp, or its
+        // amplitude turned, jumps by the gap).
         const w = s.waves.get(net);
         const was = prior?.waveKinds?.get(net);
-        const from =
-          was && was !== w.wave
-            ? waveGenerator(was, before.clockPhase.get(w.id), before.clockTimes.get(w.id), w.volts ?? s.vHigh, target) // prettier-ignore
-            : generatorOf(net, target, before);
+        const changed = was && (was.wave !== w.wave || was.amplitude !== w.amplitude || was.offset !== w.offset); // prettier-ignore
+        const from = changed
+          ? waveGenerator(was.wave, before.clockPhase.get(w.id), before.clockTimes.get(w.id), waveSwing(was, w.volts ?? s.vHigh), target) // prettier-ignore
+          : generatorOf(net, target, before);
         const jump = gen.value - from.value;
         if (Math.abs(jump) > WAVE_JUMP_EPS) waveJumps.set(net, jump);
       }
@@ -3570,7 +3572,7 @@ export function tick({ spice = null, ...opts }) {
       waves: waveIds(),
       // Each wave net's shape, so a shape changed mid-run jumps from where
       // the OLD one stood (`refreshWaves`).
-      waveKinds: new Map([...(s?.waves ?? [])].map(([net, w]) => [net, w.wave])), // prettier-ignore
+      waveKinds: new Map([...(s?.waves ?? [])].map(([net, w]) => [net, { wave: w.wave, amplitude: w.amplitude, offset: w.offset }])), // prettier-ignore
       voltages: volt.snapshot(),
     },
     nodeVolts,

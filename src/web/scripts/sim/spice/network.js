@@ -44,7 +44,11 @@
 //        from its own supply pin's net (`ref`) rather than from 0 V, its
 //        current drawn from (or returned to) the chip's supply pin (`feed`)
 //        — so what an output sources really comes in through its VCC —
-//        piecewise linear like the rest, their slopes read numerically.
+//        piecewise linear like the rest, their slopes read numerically;
+//   "t"  a 74LS gate's phase splitter part-way on while its output is HIGH
+//        (spice/output-stage.js `splitterAmps`): a current from the output
+//        to the chip's GND, set by the voltage on its lowest input (`ins`,
+//        read like a MOSFET's gate — they carry none of it).
 //
 // and the one-terminal DRIVERS on a node — a chip output as the stage it is
 // (spice/output-stage.js), and a TTL input's own bias, which pushes current
@@ -61,6 +65,8 @@ import { ledCurrent, ledSlope } from "./leds.js";
 import { diodeCurrent, diodeSlope } from "./diodes.js";
 import { tableSegment } from "./junction-table.js";
 import {
+  splitterAmps,
+  splitterPiece,
   stageCurrent,
   stageDelivers,
   stagePiece,
@@ -121,13 +127,14 @@ const DEVICE_DV = 1e-6;
 /** Whether a branch is a DEVICE: more than two terminals, or a current that
     is not a function of the voltage across one pair. */
 export function isDevice(br) {
-  return br.kind === "q" || br.kind === "m" || br.kind === "s" || ANALOG_KINDS.has(br.kind); // prettier-ignore
+  return br.kind === "q" || br.kind === "m" || br.kind === "s" || br.kind === "t" || ANALOG_KINDS.has(br.kind); // prettier-ignore
 }
 
 /** Every node a device's current depends on. */
 export function deviceEnds(br) {
   if (br.kind === "q") return [br.b, br.c, br.e];
   if (br.kind === "m") return [br.a, br.b, br.g];
+  if (br.kind === "t") return [br.out, br.gnd, ...br.ins];
   if (ANALOG_KINDS.has(br.kind)) return analogEnds(br);
   return [br.out, br.ref, br.feed];
 }
@@ -137,6 +144,7 @@ export function deviceEnds(br) {
 function deviceTerminals(br) {
   if (br.kind === "q") return [br.b, br.c, br.e];
   if (br.kind === "m") return [br.a, br.b];
+  if (br.kind === "t") return [br.out, br.gnd];
   if (ANALOG_KINDS.has(br.kind)) return analogTerminals(br);
   return [br.out, br.feed];
 }
@@ -202,6 +210,7 @@ function offStageCurrent(br, vAt, v) {
  *   "s" (`{out, ref, feed, stage, offset}`): a stage whose open-circuit
  *       level is `offset` volts from its reference node, pushing into `out`
  *       what it takes from `feed` (spice/output-stage.js `stageCurrent`).
+ *   "t" (`{out, gnd, ins}`): a 74LS splitter's current, `out` to `gnd`.
  */
 export function deviceCurrents(br, vAt) {
   if (br.kind === "q") {
@@ -224,6 +233,13 @@ export function deviceCurrents(br, vAt) {
       [br.feed, -i],
     ];
   }
+  if (br.kind === "t") {
+    const i = splitterAmps(splitterIn(br, vAt), vAt(br.out) - vAt(br.gnd));
+    return [
+      [br.out, -i],
+      [br.gnd, i],
+    ];
+  }
   if (ANALOG_KINDS.has(br.kind)) return analogCurrents(br, vAt);
   const va = vAt(br.a);
   const vb = vAt(br.b);
@@ -233,6 +249,13 @@ export function deviceCurrents(br, vAt) {
     [br.a, -i],
     [br.b, i],
   ];
+}
+
+/** A 74LS splitter's input: its lowest, against the chip's GND. */
+function splitterIn(br, vAt) {
+  let low = Number.POSITIVE_INFINITY;
+  for (const n of br.ins) low = Math.min(low, vAt(n));
+  return low - vAt(br.gnd);
 }
 
 /** A device's avalanche current past `volts` (its `v` across it the way it
@@ -298,6 +321,8 @@ export function deviceConducts(br, vAt) {
     return tf > CONDUCTS_A || over > 0;
   }
   if (br.kind === "s") return offStageCurrent(br, vAt, vAt(br.out)) !== 0;
+  // A splitter's microamps hold nothing.
+  if (br.kind === "t") return false;
   if (ANALOG_KINDS.has(br.kind)) return analogConducts(br, vAt);
   const va = vAt(br.a);
   const vb = vAt(br.b);
@@ -392,6 +417,8 @@ export function piecesBy(drivers, branches, vAt) {
       out += bodyPiece(br, va, vb) + "|";
     } else if (ANALOG_KINDS.has(br.kind)) {
       out += analogPiece(br, vAt);
+    } else if (br.kind === "t") {
+      out += splitterPiece(splitterIn(br, vAt), vAt(br.out) - vAt(br.gnd));
     } else if (br.kind === "s") {
       const st = stageAt(br, vAt);
       const v = vAt(br.out);
@@ -403,7 +430,7 @@ export function piecesBy(drivers, branches, vAt) {
 }
 
 /** The branch kinds `pieces` reads a piece off — kept in step with it. */
-const PIECEWISE_KINDS = new Set(["j", "q", "m", "s", ...ANALOG_KINDS]);
+const PIECEWISE_KINDS = new Set(["j", "q", "m", "s", "t", ...ANALOG_KINDS]);
 
 /**
  * Whether a network has anything with pieces at all (`pieces`): a stage or a

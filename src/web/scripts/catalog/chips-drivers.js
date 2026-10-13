@@ -80,7 +80,8 @@ const OPTO_NOTE =
   "cathode LOW. Under Spice Lite the LED is an infrared LED (about 1.2 V; " +
   "give it a series resistor like any LED) and the phototransistor carries " +
   "the LED's current times its CTR, never more than the circuit lets " +
-  "through — set the CTR in Properties. The two sides share nothing, so " +
+  "through — set the CTR in Properties; it holds from 5 mA through the LED " +
+  "up and falls below that. The two sides share nothing, so " +
   "each may run from its own supply.";
 
 export const CHIPS_DRIVERS = Object.freeze([

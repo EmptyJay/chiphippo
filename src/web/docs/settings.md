@@ -115,7 +115,9 @@ The **Spice Lite** tab switches on the more electrical simulation (see
 [Spice Lite](spice-lite.md)). **Spice Lite** turns it **On** or **Off**,
 from the next Run. **Settle gap** is how close a voltage that no input is
 watching gets to its final value before the probe stops redrawing it (1 % by
-default). A **TTL | CMOS** strip shows the families the parts palette shows
+default). **Switch bounce** makes a switch's contacts bounce for a few
+milliseconds as they close, as a real one's do (Off by default; see
+[Switch bounce](spice-lite.md#switch-bounce)). A **TTL | CMOS** strip shows the families the parts palette shows
 (and any family the open project uses). Under each are its datasheet source, a
 **Reset to defaults** button, and an **Advanced** section holding every number
 Spice Lite uses for that family. A value that won't read turns red and keeps

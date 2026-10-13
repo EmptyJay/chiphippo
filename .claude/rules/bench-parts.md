@@ -41,7 +41,12 @@ engine beyond the regulator supply rule.
   K is L. The LM358 is a COMB comparator (X when its inputs agree). The load is inert.
 - **Spice Lite devices** (`spice/analog-devices.js`, kinds `o` opto, `a` op-amp unit, `g`
   regulator, `e` load; placed by `spice/bench-parts.js` `benchDevices`, per netlist):
-  each a piecewise-linear current law in `network.js`'s device set. A regulator and an
+  each a piecewise-linear current law in `network.js`'s device set. An opto carries
+  CTR × `optoTransfer(IF)` (2026-10-13): ONE common curve (`OPTO_TRANSFER`, corners in
+  IF) — the CTR set holds from 5 mA up and falls below it (0.725 at 2 mA, 0.51 at 1 mA,
+  0.32 at 0.5 mA, 0.09 at 0.1 mA: the mean of Vishay 4N35 Fig. 2 and Sharp PC817 Fig. 7,
+  each relative to its own 5 mA; above 5 mA the sheets disagree — one rises, one falls —
+  so it is flat). Its piece names the transfer chord too. No temperature. A regulator and an
   op-amp HOLD their output (`holdsOut`) as a driving output does; an op-amp's OUT pin is
   kept out of the stage drivers (`analogOuts`). The ULN is `bipolarArray` "q" devices on
   internal base nets behind `internals.resistors`, its clamps `internals.junctions` (left

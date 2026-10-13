@@ -32,8 +32,10 @@ maker). The one matrix is a small Newton solve per CLUSTER of nets (below).
   changed (signature → every cluster). A lone net (drivers + inputs only) is one bracketed
   scalar Newton (`solveDrivers`). FIXED: rails at delivered volts, clocks/flags driving
   (`sourceVolts`), RC nodes at their curve. DRIVERS: output stages (`output-stage.js`),
-  each powered input's own stages (`inputStages`: a 74LS input's bias, 0.2 mA out of
-  the pin to its 0.9 V knee, then falling to none at 1.3 V — a limited stage; a CD4000 input's two protection diodes, `CMOS_CLAMP`). BRANCHES:
+  each powered input's own stages (`inputStages`: a 74LS input's bias, the swept gate's
+  input TABLE — `TTL_INPUT`, 227 µA out of the pin at 0 V falling ~125 µA/V to 109 µA
+  at 1.08 V, then to none by 1.1 V, every point +49.6 µA per volt of VCC above 5; a
+  CD4000 input's two protection diodes, `CMOS_CLAMP`). BRANCHES:
   resistors, LEDs/segments/diodes/Zeners (`"j"`, a burnt one open), switch channels (rON,
   control read off its OWN reading), transistors as devices (`"q"`/`"m"`), off-rail chip
   loads (ICC at 5 V as a resistor).
@@ -183,6 +185,18 @@ maker). The one matrix is a small Newton solve per CLUSTER of nets (below).
   run edge by edge, 10× slower for a 68 kHz 555 beside a triangle).
   `tests/spice-waves.test.js` holds it to the closed forms (an RC on a triangle and a sine,
   a sawtooth through a high-pass, a 40106 at VT±).
+  - **Amplitude / Offset** (2026-10-13, Spice-only `valueField`s on the clock, optional,
+    `CLOCK_SWING_RANGE` 0.01–30 V, stored only on a non-level wave): `waveSwing(params,
+    supply)` → `{lo, hi, floor: 0, ceil: supply}` (unset: 0…supply, so every old desk is
+    bit-identical — `waveVolts`/`waveGenerator` still take a bare number as that). Past a
+    rail the wave is CLIPPED: `clipLine` / `clipSine` end the piece where it meets the
+    rail and hand back a `"flat"` piece (slope 0, not a quadrature state) until its line or
+    angle comes back (`nextAngle`); `endBy` ignores a crossing a hair before the edge (a
+    full swing meets its rail AT the edge). The engine's wave map carries
+    `amplitude`/`offset`, `waveKinds` holds `{wave, amplitude, offset}` so a mid-run edit
+    jumps from the old swing; the lamp is lit above the swing's (clipped) centre. The deck
+    writes the swing into PWL/SIN and wraps a clipping one in a `max/min` B-source. Golden:
+    four `-…vpp-at-…v` cases (two clipped), exact.
 - **The bench parts** (regulators, op-amp, optocouplers, ULN2003A, relay, load) are
   devices of the same solve — `.claude/rules/bench-parts.md`, which also records the
   solver changes they forced (Gauss–Seidel fallback, Brent, the sliding run-on).
@@ -504,10 +518,10 @@ tiedLow)`: `supplyMaOf` hands a silicon block a `tiedLow(pin)` read off the wiri
   CD4007UB's gate draws no `CMOS_BAND_MA` (its pair's current is the device's own).
   **Advanced fields are all real**: `sourceMa`/`sinkMa` are the family output stage's
   STRENGTH (`stageStrength` — user/default, scaling the stage like a def's `scale`);
-  `inputLowUa` scales the 74LS bias (`TTL_INPUT.ohms` ÷ ratio). `inputHighUa` was
+  `inputLowUa` scales the 74LS bias's currents (its table's volts stay put). `inputHighUa` was
   removed: a 74LS IIH is a reverse leakage the solve never drew, and a field that moves
   nothing is a lie. A **family-less** part's outputs are the common `MOS_STAGE` (rail to
-  rail behind 100 Ω, an assumption bracketed by SN74HCT00), never 74LS's 3.6 V HIGH.
+  rail behind 100 Ω, an assumption bracketed by SN74HCT00), never 74LS's curved HIGH.
   A **chip across two rails** that are not a supply's +/− (`offRail` `split`) drives "s"
   branches from its own pins in each of its pins' clusters (its rail-pinned pins in its
   `home` cluster), its ICC a `load` rail branch. A **PSU shorted** (+ on a − net) books
@@ -536,8 +550,9 @@ tiedLow)`: `supplyMaOf` hands a silicon block a `tiedLow(pin)` read off the wiri
   BURNT once Ta + RthJA·V·I passes Tj max (red 72 mA, blue 39 mA — instant, the
   package's warm-up is not
   modelled), reverse past VR 5 V (warning). Segments and bars are their colour's LED.
-  `spice/output-stage.js`: a chip output as the stage it is — 74LS HIGH VCC − 1.4 V
-  behind 120 Ω (SDLS025B's schematic), LOW 0.15 V behind 25 Ω, each ONE-WAY (the
+  `spice/output-stage.js`: a chip output as the stage it is — 74LS a TABLE (2026-10-13,
+  `table(vcc)` on the family's sides → `stage.corners`, [d, amps] from the open level;
+  see "74LS stages and mixed circuits" below), each ONE-WAY (the
   Darlington cannot sink, the saturated pull-down cannot source); CD4000 a MOSFET
   saturating at 4.2/16/28 mA (5/10/15 V, CD4029B figs) behind 400/190/200 Ω — and
   between the two the SQUARE LAW those figures set (2026-10-08: `curve` on the
@@ -648,10 +663,115 @@ tiedLow)`: `supplyMaOf` hands a silicon block a `tiedLow(pin)` read off the wiri
   the engine's GMIN to ground; and an ideal-threshold gate biased at its own threshold
   through a resistor (a 74LS two-gate astable) has no ngspice answer at all. Each JSON
   records its ngspice version: 42 → 44.2 moved nothing but the NE555's `ideal` periods
-  (+0.3 %) and the CD40106B pair (0.03 %), measured on the unchanged deck — so on
-  2026-10-08 only the CMOS-stage areas were regenerated (on 44.2) and `ne555.json`
-  stays a 42 reference. Regenerate an area only when its model moved, and say so.
+  (+0.3 %) and the CD40106B pair (0.03 %), measured on the unchanged deck. On
+  2026-10-13 EVERY area was regenerated on 44.2 (so all are one version): nothing moved
+  but `ne555` (+0.3 %, Spice Lite still A, worst −0.32 %) and `inductors` (3e-9).
+  Regenerate an area only when its model moved, and say so.
   A reading can be of a LATER moment than asked: a tick re-linearizes every corner within
   `FAST_WINDOW_S` (10 µs) of the last one past its own target, chained, so a node on a
   curve with close corners shows where it is a few µs on. The 10 V CMOS case's 1.3 % at
   0.4/0.5 ms is that, not the curve (every corner within 0.07 % of the exact square law).
+- **74LS stages and mixed circuits are graded too** (2026-10-13, areas `ls-stage` and
+  `mixed`, both `device`, both **A**, floor A). In the device flavour a 74LS INV/NAND
+  unit is its datasheet schematic transistor by transistor (`spice-deck.mjs` `lsGate`,
+  SN74LS04 SDLS029C p. 4: Schottky input diodes into a 20 kΩ phase splitter, the
+  8 kΩ / 120 Ω Darlington with 4 kΩ to Y, the 1.5k/3k squaring network), so its input
+  current, threshold and both levels are the circuit's own; its devices (`QLS`, `QLSO`,
+  `DLS` in `DEVICE_MODELS`) are FITTED to the sheet's typicals at VCC 4.75 V (VOH 3.37 V
+  at −0.4 mA, VOL 0.30/0.35 V at 4/8 mA, IIL −0.18 mA, threshold ~0.94 V). They graded
+  C against the old line stage (VCC − 1.4 V behind 120 Ω; 0.15 V behind 25 Ω): −14 % at
+  100 kΩ, −16 % on a 10 kΩ/1 µF RC, the LS-timed ring's HIGH half +17 %. Two changes
+  took both to A:
+  - **The 74LS stage is the swept gate's I-V table** (`LS_HIGH_MA`, `LS_LOW_MA`,
+    `lsHighTable` in output-stage.js). HIGH: open at VCC − 0.49 V (the same curve at
+    4.75–5.25 V, measured from its open level, within 2 mV), a soft knee to 3.6 V by
+    0.2 mA, ~120 Ω past it, shorting at 31.8 mA (5 V); the table ends at 24 mA and runs
+    on at 8.02 mA/V to the pin at 0 V, then saturates. LOW: open at 0.2044 V, plateau
+    18.5 mA (0.6–1.4 V — so a HIGH/LOW fight sits at ~1.54 V, X to a reader, under the
+    20 mA warning: the transistor gates meet at 1.57), then 152 mA past 2.6 V above it
+    (a LOW shorted to VCC still smokes). The LOW's CURRENTS follow VCC (`lsLowTable`,
+    2026-10-13: one corner set, `LS_LOW_D`, swept at 4.75/5/5.25 V — plateau
+    16.8/18.5/20.2 mA, open level the same within 0.3 mV — straight lines between,
+    held at the nearer outside; cases `ls-low-220-*v` / `ls-high-2k2-*v` grade both
+    stages across the range; 220 Ω's load line lies along the plateau, so a chord
+    there must stay flat: the corner at 1.238 V). `ohms` stays
+    120/25 as a REPRESENTATIVE slope only (`offStageSlope`'s Newton guide). `scale` /
+    strength multiply the table's currents, never its volts. Any curved stage is
+    `isCurved` (a `vov` or `corners`); `stageCorners`/`cornersOf` return a table's own.
+  - **The phase splitter's current** (`splitterAmps`, `SPLITTER_UA`): an LS INV/NAND
+    input held LOW above ground (an LS LOW's 0.21 V) leaves the pull-down part-way on —
+    a current out of the HIGH output to GND set by the LOWEST input alone (15 µA at
+    0.2 V, 54 µA at 0.4 V, held past 0.8 V; independent of the output's volts from 1 to
+    4 V and of VCC; ramped to 0 under 0.2 V on the output). Nothing to a mA load, but the
+    HIGH's knee 75 mV lower on the ring's 10 kΩ — the last 3.5 %. It is network.js
+    device kind **"t"** (`{out, gnd, ins}`), there only while that output is HIGH
+    (`deviceBranch`), its inputs read like a MOSFET's gate (`gateUsers` orders/re-solves;
+    NOT in `gates`, so a floating TTL input keeps no charge — `settleNet` re-solves on
+    `gateUsers` and keeps voltage on `gates`), no join. `splitterUnits(def)` is the one
+    predicate (74LS, INV/NAND units, no `outputStage`/`schmitt`/`openCollector`), shared
+    with the deck's same flavour (`splitterExpr`, B-source gated by the unit's level).
+    A LONE net keeps its fast path: `isLone` admits "t" devices to a rail whose inputs
+    are other nets, and `loneStages` adds each as a one-way sink stage
+    (`splitterStage`, two corners), booked in lone `flows` by hand.
+  - **The 74LS input is the same gate's swept input** (`TTL_INPUT` in params.js, a
+    `corners` stage like the outputs'): it was a flat 200 µA to 0.9 V falling to none at
+    1.3 V, which read the 470 Ω pull-down case 9 % low (A only by the 20 mV floor); the
+    table reads both pull-downs within 0.2 %. Its switch at 1.08–1.1 V is a 20 mV cliff
+    (the gate regenerates), so a 10 kΩ pull-down — or a 10k/2.2k divider — rests ON it,
+    and a tick runs that corner inside itself; a node charging through it is woken at
+    each of its other corners (`spice-engine.test.js` `throughCorners`).
+  The same-flavour deck mirrors both exactly (ring and RC identical to Spice Lite in
+  ngspice). Cases: `ls-chain` / `ls-nand-chain` grade the splitter (an inverter chain's
+  third HIGH 4.10 V into 100 kΩ). Spice Lite still READS a 74LS input by the sheet's
+  VIL 0.8 / VIH 2 bands (the transistor gate switches at ~1 V), so a diode-AND on an LS
+  LOW through 10 kΩ (0.82 V) reads X. Mind the bench layout in a case: two parts in the
+  same column half are one node (the first mixed oscillator shorted its RC that way).
+- **Clock waves and bench parts are graded too** (2026-10-13, areas `waves` and
+  `bench-parts`, both **A**, floor A — the accuracy review's §5 hand comparisons made
+  mechanical). The harness runs clock bricks as SimController does (`measure`'s
+  `clocksAt`: edges from Run, LOW first, `clockPhase`/`clockTimes` into each tick via
+  `runner.run`'s third argument; edges are ticks). The deck writes a WAVE clock as the
+  ideal source Spice Lite makes it (`waveSource`: SIN for the sine, else PWL through every
+  corner, one period past `stop` — a float `k·period ≤ stop` once dropped the last
+  period); a square/PWM clock throws `Unsupported`. Bench parts are their
+  analog-devices.js laws as B-sources in either flavour (`benchBlock`, read through
+  `benchDevices`; the chip loop skips `optocoupler`/`opAmps` defs) — `same` cases, since
+  no vendor model exists: they grade the SOLVE. A ULN2003A (`arrayBlock`) is device-only:
+  its 2.7 kΩ, each channel's Darlington as its `ARRAY_MODELS` figures' cards, its clamp a
+  1N4148 to COM. A case's output must reach something or the deck leaves its unit out
+  (the Schmitt wave case reads its output across 100 kΩ for that reason).
+- **Switch bounce** (2026-10-13, `sim/bounce.js`; `spiceLite.bounce`, Spice Lite only,
+  read at Run): a def with `contactBounce` (sw-slide, sw-push, sw-toggle, the DIP banks)
+  whose contacts CLOSE bounces — `ContactBounce.watch` compares each switch's
+  `internalBridges(params, partState)` with the last seen (only when the snapshot or a
+  part-state changed: `#contactsSeen`, `#partStateVersion`), a first sighting only
+  remembered; an opening is clean. `bounceIntervals(compId#moves)` (seeded: the same
+  press bounces the same way) gives the open gaps from t0: a 0.15–0.4 ms travel, then 3–6
+  touches, all inside `BOUNCE_MAX_S` 3 ms. In a gap the switch keeps only the contacts both
+  positions share (`gapContacts` — a slide switch's old throw never re-makes), via a
+  partState `{contacts}` that `buildNetlist`'s partition honours in place of
+  `internalBridges`; `#bounceNetlist` builds one per set of gaps, and `#nextEvent` adds
+  each make/break as an unclamped wake (no `MIN_SHOWN_S`). `#base` is the snapshot's own
+  netlist (what `#circuit` used to double as); `#forgetDocument` drops `#base`,
+  `#bounceNets`, `#contactsSeen` and `#lampJunctions` (a test's fakeDoc returns ONE
+  object, so identity alone is no key). A bounce tick's board carries `ownNetlist: true`
+  on sim-tick and sim-state, and the Worker host forwards that netlist instead of nulling
+  it (sim-host only substitutes its version's netlist when `!ownNetlist`) — split nets have
+  ids the main thread's netlist doesn't. Not exported across a Worker hand-over (a bounce
+  in flight just ends). Tests: `lamp-average-bounce.test.js`.
+- **The CD4000 timers are graded too** (2026-10-13, area `cd4000-timers`, `device`,
+  **A**, worst 0.25 %). The deck writes each silicon block by hand in `chipBlock` (as the
+  555's): the 4060/4541 oscillator's two inverters (input read at the family trigger,
+  in-phase output and complement — Fig. 12 / Fig. 2's Cx, Rx, Rs close the loop, the
+  input's clamps carrying the junction's swing past the rails); the 4047 astable (RC
+  COMMON at ½·VDD, C/OSC in phase, R against, Q a master–slave toggle); and each dual
+  monostable section (`def.logic.sections` — the silicon now exports its section pins
+  for this — trigger edge = the trigger against its own gate-delayed copy, a discharge
+  bit and a Q bit as regenerative `memory`s, the window comparators from
+  `def.logic.sense`, the discharge `stageExpr`). Their outputs are the family's MOSFET
+  pairs. The monostable cases need ngspice's step at 2 µs: at the period's own step it
+  overshot the 5 % comparator by 30 mV through the ~83 Ω discharge (−1.3 %, ngspice's
+  error). The harness now ticks every signal-flag switch for `period` cases too (it did
+  for `tran` only, so a 1 ms trigger pulse was never seen). The 4541's 2.23·RC against
+  its sheet's 2.3 is unchanged: ngspice agrees with the network to 0.06 %, so the gap is
+  the sheet's rounded formula (the 4060's sheet says 2.2 for the same network).

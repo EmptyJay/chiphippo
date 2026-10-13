@@ -78,9 +78,30 @@
 // analyzer's stream), the settle boundary, the debugger. An input (a switch,
 // a signal key, an edit) first runs whatever is due, then ticks and publishes
 // at once — the board answers on the same event, as it always has.
+//
+// WHAT A FRAME SHOWS OF A LAMP (sim/lamp-average.js). A frame shows each LED
+// and segment at its brightness AVERAGED over the simulated time since the
+// last frame — every tick booked for as long as it held — so an LED on a fast
+// PWM clock looks steadily dim, as on a bench, rather than flickering with
+// whichever edge the frame happened to land after (`lampGlow` on sim-state).
+//
+// SWITCH BOUNCE (sim/bounce.js; Settings ▸ Spice Lite ▸ Switch bounce, read
+// at Run). Under Spice Lite with it on, a mechanical switch whose contacts
+// close bounces for a few milliseconds: at each of its gaps the board ticks
+// with a netlist of its own, the closing contacts open (`#bounceNetlist`) —
+// each make and break a tick of the batch queue, beside the clocks' edges.
+// Such a tick's board names its own netlist (`ownNetlist`), since the views'
+// is the switch as it stands.
 
 import { formatNumber, t } from "../i18n.js";
 import { prepareCircuit } from "../sim/engine.js";
+import { buildNetlist } from "../sim/netlist.js";
+import { ContactBounce } from "../sim/bounce.js";
+import {
+  LampAverage,
+  lampBrightness,
+  lampJunctions,
+} from "../sim/lamp-average.js";
 import { ENGINES, engineFor } from "../sim/engines.js";
 import { normalizeSpiceConfig } from "../sim/spice/config.js";
 import { familyParams } from "../sim/spice/params.js";
@@ -120,6 +141,7 @@ import {
   RunMeter,
 } from "./sim-pacer.js";
 import { nextDisplayFrame, sampleAnalog } from "../sim/spice/sample.js";
+import { waveSwing } from "../sim/spice/waves.js";
 
 /** The wall clock, in ms — monotonic where the platform has one. */
 const wallMs = () => globalThis.performance?.now?.() ?? Date.now();
@@ -352,6 +374,19 @@ export class SimController {
   // the whole document per tick was 5% of a busy desk's main thread.
   #docSnap = null;
   #circuit = null;
+  // The netlist the snapshot's switches stand as (#circuit's may be a
+  // bounce's), the bounce's own last built, and every netlist a bounce built
+  // (a board ticked on one names it — `ownNetlist`).
+  #base = null; // {doc, netlist}
+  #bounceNets = null; // {doc, key, netlist}
+  #bounceBuilt = new WeakSet();
+  #bounce = new ContactBounce(); // run-volatile (sim/bounce.js)
+  #contactsSeen = null; // {doc, version}: what #bounce last looked at
+  #partStateVersion = 0; // bumped by every part-state (a held button)
+  // Each lamp's brightness over the frame (sim/lamp-average.js), and its
+  // junctions for the document snapshot.
+  #lamps = new LampAverage();
+  #lampJunctions = null; // {doc, list}
   #debugStalled = false; // the stall is the debugger's (a person is reading it)
   #debugDeciding = false; // inside afterTick: what it shows is the debugger's
   #heldInputs = []; // input events made while the debugger held the board
@@ -522,6 +557,9 @@ export class SimController {
     const token = ++this.#runToken;
     this.#runConfig = this.#spiceConfig;
     this.#engine = engineFor(this.#runConfig);
+    this.#bounce.reset();
+    this.#contactsSeen = null;
+    this.#lamps.reset();
     this.#analog = null;
     this.#frameAt = null;
     this.#lastTick = null;
@@ -688,6 +726,9 @@ export class SimController {
       finalImages.set(compId, this.imageBytesOf(compId));
     }
     this.#mode = TRANSPORT.STOPPED;
+    this.#bounce.reset();
+    this.#contactsSeen = null;
+    this.#lamps.reset();
     this.#analog = null;
     this.#frameAt = null;
     this.#lastTick = null;
@@ -967,10 +1008,14 @@ export class SimController {
    * edge by edge. Clock edges keep their exact moments.
    */
   #nextEvent() {
-    const wake =
+    let wake =
       this.#wakeAt == null
         ? null
         : Math.max(this.#wakeAt, this.#tickAt + MIN_SHOWN_S);
+    // A bouncing contact's next make or break, at its own moment: a bounce
+    // is faster than anything the cap draws (sim/bounce.js).
+    const bounce = this.#bounce.active ? this.#bounce.nextAt(this.#tickAt) : null; // prettier-ignore
+    if (bounce != null) wake = wake == null ? bounce : Math.min(wake, bounce);
     return this.#schedule.next(wake);
   }
 
@@ -1370,6 +1415,7 @@ export class SimController {
   // #forgetDocument, so the catch-up runs first and the edit lands after it.
 
   #onPartState = () => {
+    this.#partStateVersion += 1;
     const live = this.running && !this.#suppress;
     if (live && this.#holdBoard()) return;
     if (live) this.#catchUp();
@@ -1406,6 +1452,8 @@ export class SimController {
     const netlist = this.#netlist.get(this.#engine === ENGINES.spice ? { inductors: "branch" } : undefined); // prettier-ignore
     return this.#hold(() => {
       this.#docSnap = doc;
+      this.#base = { doc, netlist };
+      this.#contactsSeen = null;
       this.#circuit = prepareCircuit(doc, netlist);
       after?.();
     });
@@ -2014,12 +2062,51 @@ export class SimController {
   #forgetDocument() {
     this.#docSnap = null;
     this.#circuit = null;
+    this.#base = null;
+    this.#bounceNets = null;
+    this.#contactsSeen = null;
+    this.#lampJunctions = null;
   }
 
   /** The document as the run reads it: one snapshot, kept until it changes.
       Read-only — the engine, the clocks and the signals all share it. */
   #document() {
     return (this.#docSnap ??= this.#doc.toJSON());
+  }
+
+  /** Have the run's bounce look at the switches, when the document or a
+      held button has changed since it last did. */
+  #watchContacts(doc, at) {
+    const seen = this.#contactsSeen;
+    if (seen?.doc === doc && seen.version === this.#partStateVersion) return;
+    this.#contactsSeen = { doc, version: this.#partStateVersion };
+    const states = new Map(this.#netlist.partStates?.() ?? []);
+    const bounce = this.#engine === ENGINES.spice && this.#runConfig.bounce;
+    this.#bounce.watch(doc, states, at, bounce);
+  }
+
+  /** The netlist of the snapshot with the switches in `gaps` (compId → the
+      contacts each keeps) caught open — built once per set of gaps. */
+  #bounceNetlist(doc, gaps) {
+    const key = JSON.stringify([...gaps]);
+    const kept = this.#bounceNets;
+    if (kept?.doc === doc && kept.key === key) return kept.netlist;
+    const states = new Map(this.#netlist.partStates?.() ?? []);
+    for (const [id, contacts] of gaps) {
+      states.set(id, { ...states.get(id), contacts });
+    }
+    const netlist = buildNetlist(doc, states, this.#engine === ENGINES.spice ? { inductors: "branch" } : {}); // prettier-ignore
+    this.#bounceBuilt.add(netlist);
+    this.#bounceNets = { doc, key, netlist };
+    return netlist;
+  }
+
+  /** Every LED's and segment's junction on the snapshot. */
+  #junctionsOf(doc) {
+    if (this.#lampJunctions?.doc !== doc) {
+      this.#lampJunctions = { doc, list: lampJunctions(doc) };
+    }
+    return this.#lampJunctions.list;
   }
 
   /** One engine tick + publish (or, inside a batch, owed to its end).
@@ -2033,10 +2120,18 @@ export class SimController {
       // while it lasts (the cache has already moved on when an edit's
       // catch-up runs — see #onDocChanged), else the cache's.
       // Spice Lite's carries every inductor as a branch of its own.
-      const netlist =
-        this.#circuit?.doc === doc
-          ? this.#circuit.netlist
-          : this.#netlist.get(this.#engine === ENGINES.spice ? { inductors: "branch" } : undefined); // prettier-ignore
+      if (this.#base?.doc !== doc) {
+        const netlist =
+          this.#circuit?.doc === doc
+            ? this.#circuit.netlist
+            : this.#netlist.get(this.#engine === ENGINES.spice ? { inductors: "branch" } : undefined); // prettier-ignore
+        this.#base = { doc, netlist };
+      }
+      const now = at ?? this.#simNow();
+      // A switch caught in a bounce's gap: the board as it is then.
+      this.#watchContacts(doc, now);
+      const gaps = this.#bounce.active ? this.#bounce.gapsAt(now) : null;
+      const netlist = gaps?.size ? this.#bounceNetlist(doc, gaps) : this.#base.netlist; // prettier-ignore
       if (this.#circuit?.doc !== doc || this.#circuit?.netlist !== netlist) {
         this.#circuit = prepareCircuit(doc, netlist);
       }
@@ -2067,13 +2162,14 @@ export class SimController {
         ...(this.#engine === ENGINES.spice ? { clockTimes: this.#clockTimes() } : {}), // prettier-ignore
         signalLevels: this.#driveLevels(),
         images: this.#images,
-        now: (this.#tickAt = at ?? this.#simNow()),
+        now: (this.#tickAt = now),
         observer,
         spice,
         context: this.#circuit,
       });
       if (result.analog) this.#analog = result.analog;
       this.#lastTick = { result, netlist };
+      this.#lamps.record(now, lampBrightness(this.#junctionsOf(doc), netlist, result)); // prettier-ignore
       this.#frameAt = result.frameAt ?? null;
       this.#sampleOwed = false;
       this.#warm = result.netLevels;
@@ -2298,6 +2394,8 @@ export class SimController {
           mode: this.#mode,
           at,
           netlist,
+          // A bounce's netlist travels with its board (sim-worker-host.js).
+          ownNetlist: this.#bounceBuilt.has(netlist),
           netLevels: result.netLevels,
           nodeVolts: result.nodeVolts ?? NO_READINGS,
           supplies: result.supplies ?? NO_READINGS,
@@ -2389,6 +2487,12 @@ export class SimController {
         : tick;
     this.#lastPublishWall = this.#wall();
     this.#shownStrong = result?.strongLevels ?? new Map();
+    // Each lamp's brightness over the time this frame covers — only a
+    // moving run's: a step, a pause or the debugger shows the tick itself.
+    const lampGlow =
+      tick && !tick.replay && this.#mode === TRANSPORT.RUNNING && !this.#debugStalled // prettier-ignore
+        ? this.#lamps.take(this.#shownAt())
+        : null;
     this.#scope.dispatchEvent(
       new CustomEvent("chiphippo:sim-state", {
         detail: {
@@ -2401,6 +2505,8 @@ export class SimController {
           chipStatus: result?.chipStatus ?? new Map(),
           warnings: result?.warnings ?? [],
           netlist: netlist ?? null,
+          // A bounce's netlist: it travels with the board (sim-worker-host.js).
+          ownNetlist: netlist ? this.#bounceBuilt.has(netlist) : false,
           clockLevels: this.#shownClockLevels(result, netlist),
           // Clocks held by their own pause (not the transport's) — each
           // clock brick's pause button shows resume for these. Empty when
@@ -2439,6 +2545,11 @@ export class SimController {
           // what the desk lights them from. NULL on the digital engine, whose
           // LEDs the junction rule lights instead.
           lamps: result?.lamps ?? null,
+          // Each LED's and segment's brightness averaged over the simulated
+          // time this frame covers (sim/lamp-average.js: key → mean, 0 dark,
+          // a lit lamp's level, 1 on the digital engine) — or null when
+          // nothing changed in it, and the tick's own lamps are the picture.
+          lampGlow,
           // Spice Lite: the current through every lead it knows one for
           // (hole address → amps) — what the probe reads out. No part shows
           // a current of its own. Empty on the digital engine.
@@ -2491,15 +2602,19 @@ export class SimController {
     for (const [id, volts] of result?.clockSupply ?? []) {
       if (volts == null) out.set(id, L);
     }
-    // A Spice Lite wave's lamp is lit while its output stands in the upper
-    // half of its supply, not by the square its edges keep.
+    // A Spice Lite wave's lamp is lit while its output stands above the
+    // middle of its swing (its Offset, held to its rails), not by the square
+    // its edges keep.
     const volts = result?.nodeVolts;
     if (!volts || !netlist) return out;
     for (const c of this.#clocks()) {
       if (!this.#keepsPhase(c)) continue;
       const supply = result.clockSupply?.get(c.id);
       const v = volts.get(netlist.netOfPoint.get(formatAddress(c.id, "out")));
-      if (supply > 0 && v != null) out.set(c.id, v >= supply / 2 ? H : L);
+      if (!(supply > 0) || v == null) continue;
+      const sw = waveSwing(c.params, supply);
+      const centre = Math.min(sw.ceil, Math.max(sw.floor, (sw.lo + sw.hi) / 2));
+      out.set(c.id, v >= centre ? H : L);
     }
     return out;
   }

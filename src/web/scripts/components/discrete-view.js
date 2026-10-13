@@ -1313,7 +1313,7 @@ const regulatorMarks = (def) => pinLetters(def).map((name) => name[0]);
  * on the face and each leg's initial along the front edge. No lamp: what it
  * is doing is a reading (its hover, the probe), not a state.
  */
-function buildRegulator(svg, def, params) {
+function buildRegulator(svg, def) {
   const { left, width, back, tab, front } = TO220;
   const mould = back + tab;
   const label = svgEl("text", {
@@ -1994,7 +1994,7 @@ export function buildDiscreteSvg(ref, params = {}) {
     buildTransistor(svg, def, normalized);
     if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
   } else if (def.regulator) {
-    buildRegulator(svg, def, normalized);
+    buildRegulator(svg, def);
     if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
   } else if (def.contacts) {
     buildRelay(svg, def, normalized);

@@ -32,7 +32,7 @@
 //          `sourceVolts`); an RC node at its curve's voltage (spice/engine.js
 //          owns the curve — the capacitor is a source for the pass).
 //   DRIVERS  each chip output driving H or L, as the stage it is (spice/
-//          output-stage.js: a 74LS HIGH is 3.6 V behind 120 Ω, a CD4000
+//          output-stage.js: a 74LS output its swept gate's curve, a CD4000
 //          output a MOSFET that saturates) — for a chip NOT across the rails
 //          (fed through a resistor, its ground on a diode), a stage measured
 //          from its own supply pins, its current through them (spice/
@@ -101,6 +101,9 @@ import {
   stageCurrent,
   stageKinks,
   stageSlope,
+  SPLITTER_SAT_V,
+  splitterAmps,
+  splitterUnits,
 } from "./output-stage.js";
 import {
   CMOS_BAND_MA,
@@ -259,6 +262,27 @@ export function voltageTopology(doc, netlist, ctx) {
       if (!a || !b || a === b) return;
       channels.push({ key: `${c.comp.id}#${i}`, comp: c.comp.id, i, a, b, aAt: where(ch.a), bAt: where(ch.b) }); // prettier-ignore
       join(a, b);
+    });
+  }
+
+  // A 74LS gate whose inputs reach its phase splitter straight (spice/
+  // output-stage.js `splitterUnits`): each unit's splitter, part-way on
+  // while its output is HIGH, a DEVICE from the output to GND that reads its
+  // inputs as a MOSFET reads its gate — so nothing joins them: they carry
+  // none of its current.
+  for (const c of ctx.chips) {
+    if (c.passive) continue;
+    const units = splitterUnits(c.def);
+    if (!units.length) continue;
+    const gndPin = c.def.pins.find((p) => p.role === "gnd")?.n;
+    const gnd = c.pinNet.get(gndPin) ?? null;
+    if (!gnd) continue;
+    const at = sup.terminals.get(c.comp.id);
+    units.forEach((u, i) => {
+      const out = c.pinNet.get(u.output) ?? null;
+      const ins = u.inputs.map((n) => c.pinNet.get(n) ?? null).filter(Boolean);
+      if (!out || out === gnd || !ins.length) return;
+      devices.push({ key: `${c.comp.id}#t${i}`, comp: c.comp.id, kind: "t", out, gnd, ins, outPin: u.output, outAt: at?.get(u.output) ?? null, gndAt: at?.get(gndPin) ?? null }); // prettier-ignore
     });
   }
 
@@ -442,23 +466,26 @@ export function voltageTopology(doc, netlist, ctx) {
   }
   // A MOSFET's cluster depends on its gate's voltage, solved elsewhere: a
   // gate that moves re-solves it. And a gate is a capacitance — left
-  // floating it keeps its voltage (`gates`).
+  // floating it keeps its voltage (`gates`). A 74LS splitter's inputs are
+  // read the same way (`gateUsers`), but are no capacitance: a TTL input
+  // left floating keeps nothing.
   const gateUsers = new Map(); // gate net → the clusters its MOSFETs are in
   const gates = new Set();
   const railDevices = []; // every terminal on a rail: `railFlows` books them
   for (const dev of devices) {
-    const ends = dev.kind === "q" ? [dev.b, dev.c, dev.e] : ANALOG_KINDS.has(dev.kind) ? analogEnds(dev) : [dev.a, dev.b]; // prettier-ignore
+    const ends = dev.kind === "q" ? [dev.b, dev.c, dev.e] : dev.kind === "t" ? [dev.out, dev.gnd] : ANALOG_KINDS.has(dev.kind) ? analogEnds(dev) : [dev.a, dev.b]; // prettier-ignore
     const k = ends.map((n) => clusterOf.get(n)).find((x) => x != null);
     if (k == null) railDevices.push(dev);
     else {
       clusters[k].devices.push(dev);
       touchRails(clusters[k], ...ends);
     }
-    if (dev.kind === "m" && dev.g) {
-      gates.add(dev.g);
-      if (!gateUsers.has(dev.g)) gateUsers.set(dev.g, new Set());
+    const read = dev.kind === "m" && dev.g ? [dev.g] : dev.kind === "t" ? dev.ins : []; // prettier-ignore
+    if (dev.kind === "m" && dev.g) gates.add(dev.g);
+    for (const g of read) {
+      if (!gateUsers.has(g)) gateUsers.set(g, new Set());
       // A rail device's gate re-reports the rails (`RAIL`).
-      gateUsers.get(dev.g).add(k ?? RAIL);
+      gateUsers.get(g).add(k ?? RAIL);
     }
   }
 
@@ -1151,16 +1178,18 @@ export function createVoltages({
   function settleNet(net, v) {
     const was = volts.get(net);
     const gate = topo.gates.has(net);
-    const wasHeld = gate && auth.has(net);
+    // A net a device reads (a gate, a splitter's input) re-solves its users.
+    const read = gate || topo.gateUsers.has(net);
+    const wasHeld = read && auth.has(net);
     if (v == null) {
       own.auth().delete(net);
       if (!gate) own.volts().delete(net);
-      else if (wasHeld) gateMoved(net);
+      if (wasHeld) gateMoved(net);
       return;
     }
     own.auth().add(net);
     own.volts().set(net, v);
-    if (gate && (!wasHeld || !(Math.abs((was ?? 0) - v) <= 1e-9))) {
+    if (read && (!wasHeld || !(Math.abs((was ?? 0) - v) <= 1e-9))) {
       gateMoved(net);
     }
   }
@@ -1185,6 +1214,18 @@ export function createVoltages({
    */
   function deviceBranch(dev, p, nodeOf, fix, solved) {
     if (ANALOG_KINDS.has(dev.kind)) return analogBranch(dev, p, nodeOf);
+    if (dev.kind === "t") {
+      // A 74LS splitter: there only while its output drives HIGH, its
+      // inputs read where they are solved, as a MOSFET's gate is.
+      const chip = p.chips.get(dev.comp);
+      if (!chip?.drives || used.get(dev.comp)?.get(dev.outPin) !== H) return null; // prettier-ignore
+      const ins = dev.ins.map((net) => {
+        const node = nodeOf(net);
+        if (!solved(net)) fix(node, gateVolts(net, p));
+        return node;
+      });
+      return { ...dev, out: nodeOf(dev.out), gnd: nodeOf(dev.gnd), ins };
+    }
     const chip = p.chips.get(dev.comp);
     if (!chip?.ok) return null;
     if (dev.kind === "q") {
@@ -1447,18 +1488,41 @@ export function createVoltages({
     return nw;
   }
 
-  /** Whether a cluster is one net with nothing but drivers on it. */
+  /** Whether a cluster is one net with nothing but drivers on it — a 74LS
+      splitter from it to a rail, reading inputs on other nets, being one
+      more (`splitterStage`). */
   const isLone = (cl) =>
     cl.nets.length === 1 &&
     !cl.resistors.length &&
     !cl.junctions.length &&
     !cl.channels.length &&
-    !cl.devices.length &&
+    cl.devices.every(
+      (dev) =>
+        dev.kind === "t" &&
+        topo.rails.has(dev.gnd) &&
+        !dev.ins.includes(cl.nets[0]),
+    ) && // prettier-ignore
     !cl.loads.length &&
     !cl.inductors.length &&
     !cl.offChips.length;
 
-  /** One lone net's stages (its outputs', and its 74LS inputs' own). */
+  /** A lone net's 74LS splitter (a "t" device, spice/network.js) as the
+      one-way sink it is there — its inputs on other nets, solved first, so
+      its current hangs on this net's voltage alone — or null while its
+      output is not HIGH, or its inputs lift nothing. */
+  function splitterStage(dev, p) {
+    const chip = p.chips.get(dev.comp);
+    if (!chip?.drives || used.get(dev.comp)?.get(dev.outPin) !== H) return null;
+    const gnd = p.railVolts.get(dev.gnd) ?? 0;
+    let low = Number.POSITIVE_INFINITY;
+    for (const net of dev.ins) low = Math.min(low, gateVolts(net, p));
+    const amps = splitterAmps(low - gnd, SPLITTER_SAT_V);
+    if (!(amps > 0)) return null;
+    return { volts: gnd, ohms: SPLITTER_SAT_V / amps, limit: amps, sources: false, channel: false, corners: [[0, 0], [SPLITTER_SAT_V, amps]] }; // prettier-ignore
+  }
+
+  /** One lone net's stages (its outputs', its splitters' and its 74LS
+      inputs' own). */
   function loneStages(net, p) {
     const outs = [];
     for (const d of topo.drivers.get(net) ?? []) {
@@ -1466,13 +1530,19 @@ export function createVoltages({
       if (st) outs.push({ stage: st, d });
     }
     const stages = outs.map((o) => o.stage);
+    const splits = [];
     if (outs.length) {
+      for (const dev of topo.clusters[topo.clusterOf.get(net)].devices) {
+        const stage = splitterStage(dev, p);
+        if (stage) splits.push({ stage, dev });
+      }
+      stages.push(...splits.map((x) => x.stage));
       for (const r of topo.readers.get(net) ?? []) {
         const chip = p.chips.get(r.comp);
         if (chip?.ok) stages.push(...chip.inputsFor(r.pin));
       }
     }
-    return { outs, stages };
+    return { outs, stages, splits };
   }
 
   /** Solve one cluster; returns its nets. */
@@ -1491,7 +1561,7 @@ export function createVoltages({
       const { stages } = loneStages(net, plan);
       // From the first output's own level, never from where the net last
       // stood: the stages may balance over a whole range — a 74LS HIGH's
-      // 3.6 V and a CMOS input's clamp, which carries nothing from there to
+      // 4.51 V and a CMOS input's clamp, which carries nothing from there to
       // its VDD + 0.5 V — and the answer must be the same however the net
       // got there (a carried solve and a fresh one alike).
       settleNet(net, stages.length ? solveDrivers(stages, stages[0].volts) : null); // prettier-ignore
@@ -2256,11 +2326,18 @@ export function createVoltages({
         inputFlow(entry, p, net, fixed);
         return entry;
       }
-      const { outs, stages } = loneStages(net, p);
+      const { outs, stages, splits } = loneStages(net, p);
       if (!outs.length) return entry;
       const v = p === plan ? volts.get(net) : solveDrivers(stages, stages[0].volts); // prettier-ignore
       if (p !== plan) guess.set(net, v);
       for (const o of outs) stageFlow(entry, p, o, v);
+      for (const { stage, dev } of splits) {
+        // Out through the output's lead, in through GND's, into its rail.
+        const amps = -stageCurrent(stage, v);
+        if (dev.outAt) entry.leads.push([dev.outAt, amps]);
+        if (dev.gndAt) entry.leads.push([dev.gndAt, -amps]);
+        if (amps > BOOK_FLOOR_A && topo.sup.minusNets.has(dev.gnd)) entry.returns.push({ amps, minusAt: dev.gndAt }); // prettier-ignore
+      }
       inputFlow(entry, p, net, v);
       loadCheck(entry, p, net, v, outs.map((o) => ({ d: o.d, sources: o.stage.sources, open: o.stage.volts }))); // prettier-ignore
       return entry;
@@ -2309,6 +2386,10 @@ export function createVoltages({
     for (const br of nw.branches) {
       if (br.kind === "q" || br.kind === "m") {
         deviceFlow(entry, br, vAt, nodePsu, nodeMinus, p);
+        continue;
+      }
+      if (br.kind === "t") {
+        splitterFlow(entry, br, vAt, nodePsu, nodeMinus);
         continue;
       }
       if (ANALOG_KINDS.has(br.kind)) {
@@ -2430,6 +2511,19 @@ export function createVoltages({
     if (limits && amps > BOOK_FLOOR_A) entry.devices.push([br.comp, amps, Math.max(0, watts), limits]); // prettier-ignore
   }
 
+  /** A 74LS splitter's current: out through its output's lead and in
+      through its GND's, into a − rail there. (Its output's stage booked
+      what the supply delivers.) */
+  function splitterFlow(entry, br, vAt, nodePsu, nodeMinus) {
+    const flowsIn = deviceCurrents(br, vAt);
+    const where = [br.outAt, br.gndAt];
+    flowsIn.forEach(([node, amps], i) => {
+      if (where[i]) entry.leads.push([where[i], -amps]);
+      if (amps < -BOOK_FLOOR_A && nodePsu.has(node)) entry.sources.push({ psu: nodePsu.get(node), amps: -amps, plusAt: where[i] }); // prettier-ignore
+      if (amps > BOOK_FLOOR_A && nodeMinus.has(node)) entry.returns.push({ amps, minusAt: where[i] }); // prettier-ignore
+    });
+  }
+
   /** A bench part's currents (spice/analog-devices.js): through each of its
       leads, from a + rail or into a − one; and what it reports — an
       optocoupler's load against its ratings, a regulator's output and the
@@ -2509,6 +2603,8 @@ export function createVoltages({
       const vAt = (node) => gates.get(node) ?? railAt(node);
       if (ANALOG_KINDS.has(br.kind))
         analogFlow(entry, br, vAt, topo.sup.psuOfNet, topo.sup.minusNets); // prettier-ignore
+      else if (br.kind === "t")
+        splitterFlow(entry, br, vAt, topo.sup.psuOfNet, topo.sup.minusNets); // prettier-ignore
       else deviceFlow(entry, br, vAt, topo.sup.psuOfNet, topo.sup.minusNets, p);
     }
     for (const { d, net } of topo.railDrivers) {

@@ -313,6 +313,8 @@
       "enabledHint": "Simuliert die Schaltung mit Spice Lite, einer elektrisch genaueren Simulation: Knotenspannungen, sich ladende Kondensatoren, Strombegrenzung und Spannungseinbruch der Versorgung. Aus verwendet die normale Logikpegel-Simulation. Eine Änderung wirkt ab dem nächsten Start.",
       "gap": "Einschwing-Abstand",
       "gapHint": "Wann eine Spannung als angekommen gilt: sobald der Rest bis zu ihrem Endwert unter diesem Anteil des laufenden Sprungs liegt. 1 % sind etwa fünf Zeitkonstanten. Es bestimmt nur, wie lange die Sonde die Spannung neu zeichnet – die Schaltung hält es nie auf.",
+      "bounce": "Kontaktprellen",
+      "bounceHint": "Die Kontakte eines Schalters prellen beim Schließen einige Millisekunden lang, wie bei einem echten Taster oder Schiebeschalter – ein Taster am Takteingang eines Zählers kann also mehrfach zählen, und eine Entprellschaltung hat etwas zu tun. Aus: Jeder Schalter schließt sauber.",
       "family": "Logikfamilie",
       "ttl": "TTL",
       "cmos": "CMOS",
@@ -1625,7 +1627,9 @@
       "coilVolts": "Spulenspannung",
       "ctr": "Stromübertragungsverhältnis",
       "wave": "Wellenform",
-      "duty": "Pulsbreite"
+      "duty": "Pulsbreite",
+      "amplitude": "Amplitude",
+      "offset": "Offset"
     },
     "option": {
       "manual": "Manuell",

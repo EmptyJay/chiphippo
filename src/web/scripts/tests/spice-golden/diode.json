@@ -1,7 +1,7 @@
 {
   "area": "diode",
   "title": "Silicon diodes",
-  "ngspice": "ngspice-42",
+  "ngspice": "ngspice-44.2",
   "cases": {
     "diode-led-330": {
       "reference": "device",

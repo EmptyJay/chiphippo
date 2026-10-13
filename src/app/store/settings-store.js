@@ -205,9 +205,10 @@ const DEFAULTS = Object.freeze({
 
   // ── Spice Lite (Settings ▸ Spice Lite; features/spice-lite.md) ────────
   // The second, more electrical simulation engine: whether Run uses it, when
-  // a voltage nothing listens to counts as arrived (`gapPercent`), and each
+  // a voltage nothing listens to counts as arrived (`gapPercent`), each
   // logic family's OVERRIDES of its datasheet defaults (only what the user
-  // changed; Reset deletes a family's entry). App-wide like `logicFamily` —
+  // changed; Reset deletes a family's entry), and whether a switch's
+  // contacts bounce (`bounce`). App-wide like `logicFamily` —
   // a way of simulating, not part of a design. Stored unvalidated, as `ai`
   // is; the renderer coerces it (web/scripts/sim/spice/config.js). Replaced
   // whole by a patch, like every object-valued key.
@@ -215,6 +216,7 @@ const DEFAULTS = Object.freeze({
     enabled: false,
     gapPercent: 1,
     families: Object.freeze({}),
+    bounce: false,
   }),
 
   // ── AI circuit builder (Feature 260) ───────────────────────────────────────

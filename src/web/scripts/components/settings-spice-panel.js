@@ -19,7 +19,8 @@
 
 // settings-spice-panel.js — Settings ▸ Spice Lite (features/spice-lite.md
 // §5): whether Run uses the second engine, the settle gap for a node nothing
-// listens to, and each logic family's electrical numbers. A module of its own
+// listens to, whether switches bounce, and each logic family's electrical
+// numbers. A module of its own
 // so settings-dialog.js does not grow another panel's worth of rows.
 //
 // THE SETTING IS ONE OBJECT (`settings.spiceLite`), replaced whole by a
@@ -28,7 +29,7 @@
 // default (spice/params.js): a value typed back to its default is dropped,
 // and Reset drops the family's entry.
 //
-// Layout: the toggle and the gap; a TTL | CMOS strip showing only the
+// Layout: the toggle, the gap and switch bounce; a TTL | CMOS strip showing only the
 // families the tray shows (the chip-family setting, widened by any family the
 // open project uses — catalog/families.js `familiesShown`, as the tray does);
 // under it the family's source and Reset, and halfway down an "Advanced"
@@ -144,6 +145,17 @@ export function buildSpicePanel(
     value: config.enabled,
     ariaLabel: t("settings.spice.enabled"),
     onPick: (enabled) => commit({ ...config, enabled }),
+  });
+
+  // ── Switch bounce ────────────────────────────────────────────────────────
+  const bouncePicker = buildSegmented({
+    options: [
+      { value: true, label: t("settings.spice.enabledOn") },
+      { value: false, label: t("settings.spice.enabledOff") },
+    ],
+    value: config.bounce,
+    ariaLabel: t("settings.spice.bounce"),
+    onPick: (bounce) => commit({ ...config, bounce }),
   });
 
   // ── The gap ──────────────────────────────────────────────────────────────
@@ -338,6 +350,11 @@ export function buildSpicePanel(
       notes: [t("settings.spice.gapHint")],
     }),
     gapProblem,
+    rowWithNote({
+      label: t("settings.spice.bounce"),
+      control: bouncePicker,
+      notes: [t("settings.spice.bounceHint")],
+    }),
     stripHost,
     ...[...sections.values()].map(({ section }) => section),
   ];

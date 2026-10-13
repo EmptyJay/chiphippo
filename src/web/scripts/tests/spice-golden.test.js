@@ -36,6 +36,8 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { H, L } from "../sim/levels.js";
 import { runner } from "./timing-fixtures.js";
+import { partDef } from "../catalog/index.js";
+import { clockHalves } from "../sim/schedule.js";
 import {
   AREAS,
   GOLDEN_CASES,
@@ -83,17 +85,43 @@ function measure(c, grid = null, { frames = true } = {}) {
     return out;
   };
   const switches = Object.values(signals).flatMap((steps) => steps.map(([t]) => t)).filter((t) => t > 0); // prettier-ignore
+  // Each running clock brick's edges from Run, LOW first (as SimController
+  // schedules them), and its level and timing at `t`.
+  const clockDef = partDef("clock");
+  const clocks = (doc.components ?? [])
+    .filter((c) => c.kind === "clock" && clockDef.isAuto(c.params))
+    .map((c) => {
+      const { low, high } = clockHalves(c.params.hz, clockDef.dutyOf(c.params)); // prettier-ignore
+      const edges = [];
+      for (let t = 0, k = 0; t <= m.stop; k++) edges.push((t += k % 2 ? high : low)); // prettier-ignore
+      return { id: c.id, low, high, edges };
+    });
+  const clocksAt = (t) => {
+    if (!clocks.length) return {};
+    const clockPhase = new Map();
+    const clockTimes = new Map();
+    for (const c of clocks) {
+      const n = c.edges.filter((e) => e <= t).length;
+      const level = n % 2 ? H : L;
+      clockPhase.set(c.id, level);
+      clockTimes.set(c.id, { half: level === H ? c.high : c.low, since: n ? c.edges[n - 1] : 0 }); // prettier-ignore
+    }
+    return { clockPhase, clockTimes };
+  };
+  const edgeTimes = clocks.flatMap((c) => c.edges);
   const netOf = (name) => sim.netlist.netOfPoint.get(at[name]);
   const keys = keysOf(m);
   if (m.kind === "dc") {
-    const r = sim.run(0).result;
+    const r = sim.run(0, new Map(), clocksAt(0)).result;
     const values = [
       ...(m.volts ?? []).map((n) => r.nodeVolts.get(netOf(n)) ?? null),
       ...(m.amps ?? []).map((k) => r.lamps.get(k)?.amps ?? null),
     ];
     return Object.fromEntries(keys.map((k, i) => [k, values[i]]));
   }
-  const reads = m.kind === "tran" ? [...m.at, ...switches].sort((a, b) => a - b) : []; // prettier-ignore
+  // Every moment a signal flag switches is ticked (as SimController ticks an
+  // input), and a transient's reading times.
+  const reads = [...(m.kind === "tran" ? m.at : []), ...switches].sort((a, b) => a - b); // prettier-ignore
   const values = {};
   const edges = [];
   let level = null;
@@ -115,16 +143,17 @@ function measure(c, grid = null, { frames = true } = {}) {
     if (now === H || now === L) level = now;
   };
   let t = 0;
-  let r = sim.run(0, levelsAt(0)).result;
+  let r = sim.run(0, levelsAt(0), clocksAt(0)).result;
   record(0, r);
   for (let i = 0; i < MAX_TICKS; i++) {
     const nextGrid = grid ? (Math.floor(t / grid + 1e-9) + 1) * grid : Infinity; // prettier-ignore
     const nextRead = reads.find((x) => x > t) ?? Infinity;
+    const nextEdge = edgeTimes.reduce((a, e) => (e > t && e < a ? e : a), Infinity); // prettier-ignore
     const frame = frames ? (r.frameAt ?? Infinity) : Infinity;
-    const next = Math.min(r.wakeAt ?? Infinity, nextGrid, nextRead, frame);
+    const next = Math.min(r.wakeAt ?? Infinity, nextGrid, nextRead, nextEdge, frame); // prettier-ignore
     if (!(next <= m.stop)) break;
     t = next;
-    r = sim.run(t, levelsAt(t)).result;
+    r = sim.run(t, levelsAt(t), clocksAt(t)).result;
     record(t, r);
   }
   if (m.kind === "tran") return values;

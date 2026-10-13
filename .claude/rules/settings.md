@@ -52,7 +52,8 @@ Serial I/O is the one panel that is NOT live-apply (see "Arduino serial integrat
   the breadboard (that segment was the way back). The view itself stays a toolbar toggle,
   never persisted — this decides only whether the toggle is there.
 - **`spiceLite`** (Settings ▸ **Spice Lite**, its own tab between Serial I/O and Data
-  Sheets; `components/settings-spice-panel.js`): `{enabled, gapPercent, families}`, ONE
+  Sheets; `components/settings-spice-panel.js`): `{enabled, gapPercent, families,
+  bounce}` (`bounce`: Switch bounce, On/Off after the gap, default false), ONE
   object emitted whole, families holding OVERRIDES only (Reset deletes a family's entry).
   App-wide (Jason, 2026-10-07). Read by `SimController` at RUN, never mid-run — the whole
   object, numbers included (`#runConfig`: a budget edited mid-run must not brown-smoke a

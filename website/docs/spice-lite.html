@@ -137,24 +137,30 @@ resistors pulling against each other, can only say undefined. A
 the joined anodes) gives a diode&#39;s drop, about 0.6 V, above a LOW output, which reads
 LOW. An LED or a diode in a chip&#39;s supply drops its voltage too.</li>
 <li><strong>A 74LS input pushes current out of its pin</strong> while it is held LOW:
-about 0.2 mA, steady up to about 0.9 V, then less and less to none at
-1.3 V. Pulled down through <strong>1 kΩ</strong> it sits at about 0.2 V, a good LOW;
-through <strong>4.7 kΩ</strong> at 0.9 V and through <strong>10 kΩ</strong> at 1.1 V, both in its
+about 0.23 mA at 0 V, less and less as the pin rises, down to 0.11 mA at
+1.08 V, where the gate switches and lets go. Pulled down through <strong>1 kΩ</strong> it
+sits at about 0.21 V, a good LOW, and through <strong>4.7 kΩ</strong> at 0.7 V, still
+LOW; through <strong>10 kΩ</strong> it sits at the gate&#39;s switch, 1.09 V, in its
 undefined band — the reason a 74LS input is never pulled down through more
-than a couple of kilohms on a real bench. A CD4000 input draws nothing, so
+than a few kilohms on a real bench. A CD4000 input draws nothing, so
 10 kΩ is fine there. The example circuits pull 74LS inputs down through
 1 kΩ for this reason.</li>
-<li><strong>A 74LS HIGH is about 3.6 V</strong>, unloaded. That is plenty for another 74LS
-input, and only just enough for a CD4000 input on 5 V; on 12 V it is no
-HIGH at all.</li>
+<li><strong>A 74LS HIGH is about 4.3–4.5 V</strong>, unloaded, and falls fast under a load:
+3.6 V by 0.2 mA, 3.4 V at 4 mA. That is plenty for another 74LS input,
+and only just enough for a CD4000 input on 5 V once anything else hangs on
+the wire; on 12 V it is no HIGH at all. (The higher figure is a gate whose
+input is grounded; one whose input is held LOW by another 74LS output sits
+lower, because that input&#39;s 0.2 V leaves its output transistor a little
+on.)</li>
 <li><strong>A loaded output sags.</strong> A CD4000 output at 5 V lighting an LED through
 330 Ω sags to about 3.2 V — under its own family&#39;s HIGH threshold, so a
 CD4000 input on the same wire reads it as undefined. Through 1 kΩ it stays
 at 4.1 V. The CD4000 example circuits use 1 kΩ for their LEDs for this
 reason.</li>
 <li><strong>Two outputs fighting</strong> meet where their strengths put them: a 74LS LOW
-beats a 74LS HIGH at about 0.75 V, so the inputs on that wire read LOW. The
-conflict is still reported, and both outputs carry the current (below).</li>
+gives out at about 18.5 mA, all its drive allows, so a 74LS HIGH lifts the
+wire to about 1.5 V — undefined to the inputs on it. The conflict is
+reported, and both outputs carry the current (below).</li>
 <li><strong>Open-collector outputs</strong> (74LS01, 74LS03, 74LS05, 74LS47, and the
 74LS181&#39;s A=B) never drive HIGH: wired together with a pull-up they make a
 wired-AND, in both engines.</li>
@@ -196,12 +202,12 @@ oscillator work: a resistor from the output back to the input and a
 capacitor from the input to ground swing between the two thresholds at a
 steady rate. Built round an ordinary inverter, the same circuit has
 nothing to swing between and is reported as oscillating.</li>
-<li><strong>A 74LS input on a node pushes its own current into it</strong> below 1.3 V, so
+<li><strong>A 74LS input on a node pushes its own current into it</strong> below 1.1 V, so
 an RC into a 74LS input starts faster than its R·C alone, and a 74LS14
 oscillator needs a resistor of a kilohm or so to swing at all (through
 10 kΩ its own input holds the capacitor above its lower threshold).</li>
 <li><strong>A chip output charges a node only as far as its HIGH.</strong> A 74LS output
-takes it to about 3.6 V; on a desk with a 12 V supply, a CD4000 gate on
+takes it to about 4.5 V, the last of it slowly; on a desk with a 12 V supply, a CD4000 gate on
 12 V, which switches at 6 V, never sees it change: the reason a 5 V part
 can&#39;t drive 12 V CMOS directly.</li>
 <li><strong>A node that will never get there is left alone.</strong> If the resistors only
@@ -231,7 +237,7 @@ answer is the same however often the desk is redrawn.</li>
 <li><strong>The analyzer draws voltages.</strong> A channel on a
 <a href="logic-analyzer.html">logic analyzer</a> is drawn as its wire&#39;s voltage, so a
 charging capacitor curves up toward its supply instead of stepping from LOW
-to HIGH, and a 74LS signal swings between about 0.2 V and 3.6 V. The
+to HIGH, and a 74LS signal swings between about 0.2 V and 4.4 V. The
 channel&#39;s value reads in volts.</li>
 </ul>
 <p>Slow curves cost nothing to run: Spice Lite calculates <em>when</em> a node will
@@ -322,7 +328,7 @@ output.</p>
 <p>Every input wired to an output draws a little current, as its own circuit
 does: a 74LS input pushes about 0.2 mA out of a pin held LOW (it is a
 resistor and a diode to its supply inside), and nothing once its pin is past
-about 1.3 V; a CMOS input, or a memory&#39;s or processor&#39;s, draws nothing at
+about 1.1 V; a CMOS input, or a memory&#39;s or processor&#39;s, draws nothing at
 all. So an output with many inputs on it is pulled away from its level by
 them, and the voltage it ends up at is the one every input on it reads.</p>
 <ul>
@@ -331,10 +337,10 @@ input on it no longer reads the level the output is driving — though it
 would at the output&#39;s own unloaded voltage. It says the pin, the level and
 the voltage the net is held at. Too many inputs is one cause; a resistor to
 ground that is too small for a HIGH (a 74LS HIGH into 100 Ω sits at about
-1.6 V) is another. A brownout never damages anything: it is a circuit that
+1.8 V) is another. A brownout never damages anything: it is a circuit that
 does not work, not a part in danger.</li>
 <li>An output that never reaches an input&#39;s threshold even unloaded — a 74LS
-HIGH&#39;s 3.6 V into a CMOS input on 12 V — is a level mismatch, not a
+HIGH&#39;s 4.5 V into a CMOS input on 12 V — is a level mismatch, not a
 brownout: that input simply reads it as unknown.</li>
 </ul>
 <p>A CD4000 output at 5 V holds one 74LS input LOW at about 0.1 V, two at 0.2 V,
@@ -374,9 +380,9 @@ made for:</p>
 <p>Past the smoke limit the chip is drawn burnt with brown smoke rather than
 grey, drives nothing for the rest of the run, and a <strong>Brown smoke!</strong> notice
 says why.</p>
-<p>A 74LS HIGH shorted to ground carries about 30 mA (a warning); a LOW shorted
-to the supply about 190 mA (brown smoke). Two 74LS outputs fighting each other
-carry about 24 mA. An ordinary CD4000 output at 5 V cannot pass enough current
+<p>A 74LS HIGH shorted to ground carries about 32 mA (a warning); a LOW shorted
+to the supply about 150 mA (brown smoke). Two 74LS outputs fighting each other
+carry about 19.5 mA, just under the warning. An ordinary CD4000 output at 5 V cannot pass enough current
 to hurt itself; at 15 V a short lets out the smoke. The CMOS parts built to
 drive more — the CD4049UB/CD4050B buffers&#39; LOW, the CD4511B&#39;s segment drivers
 — are held to the same 100 mW per output transistor their datasheets give
@@ -590,6 +596,10 @@ and drops straight back, a <em>ramp down</em> drops and climbs straight back —
 <strong>sine</strong>, under Spice Lite only. Each swings from 0 V to the clock&#39;s supply
 over one period of its rate, starting at its low point, and drives its <code>out</code>
 as an ideal source, sourcing out of its supply and sinking into its ground.
+Its <strong>Amplitude</strong> (peak to peak) and <strong>Offset</strong> (its centre) move that swing —
+a 1 V sine about 2.5 V for an op-amp to amplify; blank, they are the whole
+supply about half of it. Set past a rail, the wave is <strong>clipped</strong> flat on it,
+exactly, as a generator running from those rails would be.
 (A <strong>PWM</strong> clock is not a wave but a level, as the square is: it runs in both
 engines — see <a href="power-and-clocks.html">Power &amp; Clock Sources</a>.)</p>
 <p>The wave keeps its square&#39;s timing: its LOW half is the first half of the
@@ -640,8 +650,11 @@ output warns.</li>
 <li><strong>An optocoupler</strong>&#39;s LED is an infrared LED (about 1.2 V); its
 phototransistor carries the LED&#39;s current times its <strong>CTR</strong>, never more —
 so a load wanting more than that gets less, and the transistor does not
-saturate. Past 60 mA through its LED, or 50 mA through its transistor, it
-warns.</li>
+saturate. The CTR you set holds from 5 mA through the LED up; below that
+it falls, as both makers&#39; curves do: to about half at 1 mA and a third at
+0.5 mA. So a coupler fed only a milliamp or two needs more CTR, or a
+larger load resistor, than its setting suggests. Past 60 mA through its
+LED, or 50 mA through its transistor, it warns.</li>
 <li><strong>The relay</strong>&#39;s coil is an <strong>inductor</strong> (0.14 H behind its 70 Ω at 5 V,
 0.8 H behind 400 Ω at 12 V — about 2 ms to build its current), and its
 contacts follow that <strong>current</strong>: they pull in once it reaches 75 % of its
@@ -740,10 +753,12 @@ power supply shows its draw.</li>
 <p><strong>A chip output is not a perfect source.</strong> Each output is modelled as its
 datasheet says it behaves:</p>
 <ul>
-<li>A <strong>74LS</strong> output driving HIGH is about 3.6 V behind 120 Ω, so an LED wired
-straight from it to ground lights at about 14 mA and survives. Driving LOW
-it has almost nothing in the way, so an LED from the supply straight into it
-takes over 80 mA and burns.</li>
+<li>A <strong>74LS</strong> output follows the curves of the gate&#39;s own transistors. Driving
+HIGH it is about 4.5 V with nothing on it, drops to 3.6 V by a fifth of a
+milliamp, and then behaves like 120 Ω, so an LED wired straight from it to
+ground lights at about 16 mA and survives. Driving LOW it sits at 0.2 V and
+has little in the way, so an LED from the supply straight into it takes
+nearly 100 mA and burns.</li>
 <li>A <strong>CD4000</strong> output is a small transistor that can only pass so much: about
 4 mA at 5 V, 16 mA at 10 V and 28 mA at 15 V. Lightly loaded it is about
 400 Ω at 5 V; the more it carries the more it gives way, along the curve a
@@ -785,6 +800,20 @@ sees them. Spice Lite does not know where along the rails a capacitor sits
 or what its value is: one capacitor anywhere across the rails a chip&#39;s
 supply pins are on decouples that chip. A capacitor from a signal net to
 ground is a timing capacitor, not a decoupling one, and doesn&#39;t count.</p>
+<h2 id="switch-bounce">Switch bounce</h2>
+<p>A real push button or slide switch doesn&#39;t close once. Its contact touches,
+springs off and touches again, three to six times over a couple of
+milliseconds, before it rests closed. A counter clocked straight from a
+button counts every touch, which is why real circuits <strong>debounce</strong> their
+switches: an RC into a Schmitt-trigger input, or a slide switch into an S-R
+latch.</p>
+<p>With <strong>Switch bounce</strong> on (Settings ▸ Spice Lite, Off by default), Spice Lite&#39;s
+switches do the same. Every slide switch, push button (momentary or toggle) and
+DIP switch bounces as its contacts close, for up to 3 ms, the same way each time
+you run the same presses. A contact that opens opens cleanly, and a slide
+switch&#39;s old side never touches again while its new one bounces, which is
+exactly what makes the S-R latch debouncer work. The logic analyzer shows every
+bounce. With it off, or on the standard engine, every switch closes cleanly.</p>
 <h2 id="the-spice-lite-settings">The Spice Lite settings</h2>
 <p><strong>Settings ▸ Spice Lite</strong> holds:</p>
 <ul>
@@ -794,6 +823,9 @@ ground is a timing capacitor, not a decoupling one, and doesn&#39;t count.</p>
 value before the probe and the analyzer stop redrawing it (an input watching
 it is told the moment it crosses, whatever this says). 1 % is about five time
 constants. It never holds the circuit up.</p>
+</li>
+<li><p><strong>Switch bounce</strong>: On or Off (Off by default) — see
+<a href="#switch-bounce">Switch bounce</a>.</p>
 </li>
 <li><p>A <strong>TTL | CMOS</strong> strip showing the families your tray shows (and any family
 the open project uses). Under each are its datasheet source, a <strong>Reset to
@@ -887,6 +919,11 @@ within 10 % <strong>B</strong>.</p>
 <td>within 0.4 %, from 1 kΩ to 1 MΩ</td>
 </tr>
 <tr>
+<td>The CD4047B, CD4060B, CD4541B and the CD4000 one-shots</td>
+<td>A</td>
+<td>within 0.3 % of the same circuits in ngspice</td>
+</tr>
+<tr>
 <td>LEDs, every colour, and diodes</td>
 <td>A</td>
 <td>within 0.25 % of their datasheet curves</td>
@@ -906,6 +943,31 @@ within 10 % <strong>B</strong>.</p>
 <td>A</td>
 <td>within 0.1 % at 5 V, 1.4 % at 10 V</td>
 </tr>
+<tr>
+<td>A 74LS input and output, into resistors, LEDs and capacitors</td>
+<td>A</td>
+<td>within 0.4 % of the gate&#39;s own transistors</td>
+</tr>
+<tr>
+<td>Circuits mixing 74LS, CD4000 and transistors</td>
+<td>A</td>
+<td>within 0.6 %</td>
+</tr>
+<tr>
+<td>A clock&#39;s triangle, sine, sawtooth and trapezoid waves</td>
+<td>A</td>
+<td>within 0.05 mV, into RCs and a Schmitt input</td>
+</tr>
+<tr>
+<td>The ULN2003A</td>
+<td>A</td>
+<td>within 0.3 % of its Darlingtons&#39; own models</td>
+</tr>
+<tr>
+<td>Optocouplers, the LM358, regulators and the electronic load</td>
+<td>A</td>
+<td>exact to their own laws (no maker publishes a model to check them)</td>
+</tr>
 </tbody></table>
 <p>Each grade of transistor is one part&#39;s figures (the table under
 <a href="#diodes-and-transistors">Diodes and transistors</a>), so a transistor whose part
@@ -917,8 +979,8 @@ number differs from its grade&#39;s simulates as that part, not its own.</p>
 comes round to the same voltage within one of its halves, so an oscillator
 faster than 1 kHz elsewhere on the desk (a 555 at audio rates) is run
 crossing by crossing instead of drawn by its schedule, and the desk runs
-slower — the speed button says so. A wave&#39;s amplitude and offset are not
-settings: it always swings from 0 V to its supply;</li>
+slower — the speed button says so. A wave never swings below 0 V or above
+its own supply (it is clipped there);</li>
 <li>a gate&#39;s <strong>linear region</strong>: an inverter whose own output is fed back to
 its input through a resistor (a CD4069UB amplifier, a crystal oscillator&#39;s
 bias) sits half way between LOW and HIGH on a bench — an amplifier. Spice

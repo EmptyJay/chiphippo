@@ -24,8 +24,9 @@
 //
 //   "o"  an OPTOCOUPLER (`{a, k, c, e, ctr, spec}`): its infrared LED, anode
 //        to cathode, the junction table `spec`; its phototransistor, collector
-//        to emitter, carrying CTR × IF — never more than its saturation lets
-//        through (`OPTO`: nothing below its knee, then RSAT ohms).
+//        to emitter, carrying CTR × IF — the CTR falling at a small IF
+//        (`OPTO_TRANSFER`) — never more than its saturation lets through
+//        (`OPTO`: nothing below its knee, then RSAT ohms).
 //   "a"  an OP-AMP unit (`{out, inp, inn, vcc, gnd, amp}`): open-loop gain
 //        `amp.gain` about the middle of its output swing, the swing clamped
 //        to its supply less its headroom, behind its output resistance and
@@ -61,6 +62,49 @@ export const IR_SPEC = Object.freeze({
     it, then RSAT_OHMS — 0.12 V at 2 mA, 0.2 V at 10 mA (the 4N35's VCE(sat)
     0.3 V max at 2 mA, IF 10 mA). */
 export const OPTO = Object.freeze({ kneeV: 0.1, rsatOhm: 10 });
+
+/**
+ * What an optocoupler's phototransistor carries per unit of CTR, against its
+ * LED's current — `[IF, amps]` corners, straight lines between, IF itself
+ * past the last: the CTR a part is set to holds from 5 mA up and falls below
+ * it. ONE curve for every part (Jason: one common set), read off both
+ * sheets. Vishay 4N35 (doc. 81181) Fig. 2, non-saturated CTR normalized to
+ * IF 10 mA: 0.21 at 0.5 mA, 0.36 at 1 mA, 0.76 at 5 mA, 1.33 at 30 mA.
+ * Sharp PC817 (OP18002EN) Fig. 7: 25 % at 0.1 mA, 47 % at 0.2 mA, 100 % at
+ * 0.5 mA, 150 % at 1 mA, 207 % at 2 mA, 275 % at 5 mA, its peak 290 % at
+ * 8.5 mA, 90 % at 50 mA. Below 5 mA the two fall alike — each relative to
+ * its 5 mA, 0.28 and 0.36 at 0.5 mA, 0.47 and 0.55 at 1 mA, 0.70 and 0.75 at
+ * 2 mA — and the curve is their mean (the PC817's alone under 0.5 mA, where
+ * the 4N35's stops): 0.09 at 0.1 mA, 0.17 at 0.2 mA, 0.32 at 0.5 mA, 0.51 at
+ * 1 mA, 0.725 at 2 mA. Above it one rises and the other falls, so a common
+ * curve holds the CTR set — the PC817's own test point (5 mA), and the
+ * 4N35's (10 mA) on the flat. Temperature is not modelled.
+ */
+// prettier-ignore
+export const OPTO_TRANSFER = Object.freeze(
+  [
+    [0, 0], [0.1e-3, 0.009e-3], [0.2e-3, 0.034e-3], [0.5e-3, 0.16e-3],
+    [1e-3, 0.51e-3], [2e-3, 1.45e-3], [5e-3, 5e-3],
+  ].map((c) => Object.freeze(c)),
+); // prettier-ignore
+
+/** Which of `OPTO_TRANSFER`'s chords an LED current is on (its count less
+    one past the last). */
+function transferSegment(led) {
+  let k = 0;
+  while (k < OPTO_TRANSFER.length - 1 && led >= OPTO_TRANSFER[k + 1][0]) k++;
+  return k;
+}
+
+/** What a phototransistor carries per unit of CTR at an LED current `led`,
+    amps (`OPTO_TRANSFER`). */
+export function optoTransfer(led) {
+  if (!(led > 0)) return 0;
+  const k = transferSegment(led);
+  if (k >= OPTO_TRANSFER.length - 1) return led;
+  const [[i0, g0], [i1, g1]] = [OPTO_TRANSFER[k], OPTO_TRANSFER[k + 1]];
+  return g0 + ((g1 - g0) * (led - i0)) / (i1 - i0);
+}
 
 /** An electronic load's resistance when it cannot hold its current, Ω: the
     least voltage it regulates at (a bench load's ~0.5 V at 1 A). */
@@ -147,7 +191,7 @@ export function optoAmps(br, vAt) {
   const led = vd > 0 ? tableCurrent(br.spec.table, vd) : 0;
   const vce = vAt(br.c) - vAt(br.e);
   const sat = Math.max(0, vce - OPTO.kneeV) / OPTO.rsatOhm;
-  return { led, out: vce > 0 ? Math.min(br.ctr * led, sat) : 0 };
+  return { led, out: vce > 0 ? Math.min(br.ctr * optoTransfer(led), sat) : 0 };
 }
 
 /** Each terminal's current INTO the network, amps: `[[node, amps], …]`. */
@@ -219,8 +263,9 @@ export function analogPiece(br, vAt) {
     const vce = vAt(br.c) - vAt(br.e);
     const led = vd > 0 ? tableCurrent(br.spec.table, vd) : 0;
     const sat = Math.max(0, vce - OPTO.kneeV) / OPTO.rsatOhm;
-    const out = !(vce > OPTO.kneeV) ? "0" : br.ctr * led <= sat ? "c" : "s";
-    return `${String.fromCharCode(98 + k)}${out}|`;
+    const out = !(vce > OPTO.kneeV) ? "0" : br.ctr * optoTransfer(led) <= sat ? "c" : "s"; // prettier-ignore
+    // The LED's table segment, and its current's chord of the transfer.
+    return `${String.fromCharCode(98 + k)}${led > 0 ? transferSegment(led) : ""}${out}|`; // prettier-ignore
   }
   if (br.kind === "a") {
     const [lo, hi] = swing(br, vAt);

@@ -93,8 +93,8 @@ function secondSupply(b, volts) {
 
 /** Where a node settles that a conductance `g` to ground and a current `i`
     pushed in hold, with `n` powered 74LS inputs on it — each its stage
-    (spice/params.js TTL_INPUT: a constant current out of the pin to its
-    0.9 V knee, falling to none at 1.3 V). Bisected: the stage only falls. */
+    (spice/params.js TTL_INPUT: current out of the pin along its swept
+    table, to none at 1.1 V). Bisected: the stage only falls. */
 function ttlHeld(g, i, n = 1) {
   const [bias] = inputStages(partDef("74LS04"), 5);
   let lo = 0;
@@ -112,13 +112,15 @@ function ttlHeld(g, i, n = 1) {
 const ttlBias = (g, i) => ttlHeld(g, i);
 
 test("a diode-AND: the diode carries the LOW through to the input (B)", () => {
-  // 10 k from + to N; a diode, anode N, to 1Y driven LOW; N into 2A. The
+  // 47 k from + to N; a diode, anode N, to 1Y driven LOW; N into 2A. The
   // digital engine has no forward drop — a pulled-up anode reads HIGH; on a
-  // bench N sits a diode above the LOW, which 2A reads LOW.
+  // bench N sits a diode above the LOW, which 2A reads LOW. (Through 10 k
+  // it is past VIL: 1Y's 0.23 V and the diode's 0.59 V at 0.6 mA are
+  // 0.82 V, which no LS sheet promises to read LOW.)
   const b = bench();
   const u = inverter(b, "u1", "74LS04", "e10");
   b.vcc(u.get(1)); // 1Y LOW
-  const r = b.seat("r1", "resistor", "a30", { ohms: 10e3 });
+  const r = b.seat("r1", "resistor", "a30", { ohms: 47e3 });
   b.vcc(r.get(1));
   const d = b.seat("d1", "diode", "a40");
   b.link(r.get(2), d.get(1));
@@ -129,7 +131,8 @@ test("a diode-AND: the diode carries the LOW through to the input (B)", () => {
   assert.equal(spice.level(u.get(3)), L, "a diode above the LOW reads LOW");
   assert.equal(spice.level(u.get(4)), H);
   const v = voltsAt(spice, s, u.get(3));
-  assert.ok(v > 0.6 && v < 0.8, `a diode drop above 1Y: ${v}`);
+  const drop = v - voltsAt(spice, s, u.get(2));
+  assert.ok(drop > 0.5 && drop < 0.6 && v < 0.8, `a diode drop above 1Y: ${v}`); // prettier-ignore
 });
 
 test("a divider reads its voltage, not X (C)", () => {
@@ -194,7 +197,7 @@ test("a 74LS HIGH into a 12 V CMOS input is no HIGH to it (D)", () => {
   b.link(ls.get(2), cmos.get(1));
   const { digital, spice, d, s } = both(b.doc);
   assert.equal(digital.level(cmos.get(1)), H, "digital: a HIGH is a HIGH");
-  close(voltsAt(spice, s, cmos.get(1)), 3.6, 1e-9, "VCC less two VBE");
+  close(voltsAt(spice, s, cmos.get(1)), 4.51, 1e-6, "VCC less 0.49 V, unloaded"); // prettier-ignore
   assert.notEqual(spice.level(cmos.get(2)), L, "the 12 V gate does not see a HIGH"); // prettier-ignore
   // The digital engine can only warn about it; Spice Lite shows it, and
   // retires the guesses.
@@ -270,7 +273,7 @@ test("an output shorted to ground carries its short-circuit current (H)", () => 
   b.gnd(u.get(1)); // 1Y HIGH…
   b.gnd(u.get(2)); // …into ground
   const { s } = both(b.doc);
-  const amps = 3.6 / 120;
+  const amps = stageCurrent(outputStage(partDef("74LS04"), 5, H), 0); // 31.8 mA
   close(s.currents.get(`bb1.${u.get(2)}`) ?? 0, amps, 1e-9, "the stage into 0 V"); // prettier-ignore
   const w = s.warnings.find((x) => x.type === "output-current");
   assert.ok(w && !w.smoke, "past 20 mA: a warning, not smoke");
@@ -285,12 +288,14 @@ test("a LOW shorted to + lets out the smoke", () => {
   b.vcc(u.get(2)); // …into +5 V
   const { s } = both(b.doc);
   const w = s.warnings.find((x) => x.type === "output-current");
-  close(w.amps, (5 - 0.15) / 25, 1e-9, "the LOW stage from 5 V");
+  // Pushed past the Darlington's emitter, the LOW takes 152 mA.
+  close(w.amps, -stageCurrent(outputStage(partDef("74LS04"), 5, L), 5), 1e-9, "the LOW stage from 5 V"); // prettier-ignore
+  close(w.amps, 0.152, 2e-5, "152 mA");
   assert.equal(w.smoke, true);
   assert.equal(s.chipStatus.get("u1").status, CHIP_STATUS.OVERLOADED);
 });
 
-test("two outputs fighting: the LOW wins at its voltage, and both carry it (I)", () => {
+test("two outputs fighting: they meet where both carry the same, past VIL (I)", () => {
   const b = bench();
   const u = inverter(b, "u1", "74LS04", "e10");
   b.gnd(u.get(1)); // 1Y HIGH
@@ -299,20 +304,25 @@ test("two outputs fighting: the LOW wins at its voltage, and both carry it (I)",
   b.link(u.get(2), u.get(5)); // 3A reads the fight
   const { digital, spice, s } = both(b.doc);
   assert.equal(digital.level(u.get(2)), X, "digital: a conflict");
-  // …with 3A's own 0.2 mA out of its pin pushing the net up a little.
-  const v = (3.6 / 120 + 0.15 / 25 + 0.2e-3) / (1 / 120 + 1 / 25);
-  close(voltsAt(spice, s, u.get(2)), v, 1e-6, "0.75 V");
-  assert.equal(spice.level(u.get(2)), L, "shown as what its reader sees");
-  assert.equal(spice.level(u.get(6)), H, "3A reads LOW");
+  // The LOW gives out at the 18.5 mA its base drive buys it, so the HIGH
+  // lifts the net to ~1.54 V (the transistor-level gates meet at 1.57) —
+  // with 3A's own current out of its pin pushing it up a little.
+  const hi = outputStage(partDef("74LS04"), 5, H);
+  const lo = outputStage(partDef("74LS04"), 5, L);
+  const ttl = inputStages(partDef("74LS04"), 5)[0];
+  const v = solveDrivers([hi, lo, ttl], 1);
+  close(voltsAt(spice, s, u.get(2)), v, 1e-6, "1.54 V");
+  assert.ok(v > 1.5 && v < 1.6, `${v}`);
+  assert.equal(spice.level(u.get(2)), X, "shown as what its reader sees");
+  assert.equal(spice.level(u.get(6)), X, "3A cannot tell");
   assert.ok(
     s.warnings.some((w) => w.type === "conflict"),
     "still said",
   );
-  // The chip's worst output is said: the LOW, sinking the HIGH's current
-  // and 3A's own.
-  const out = s.warnings.find((w) => w.type === "output-current");
-  close(out.amps, (v - 0.15) / 25, 1e-9, "24 mA into the LOW");
-  assert.ok((3.6 - v) / 120 > OUTPUT_LIMITS["74LS"].warnMa / 1000, "both past 20 mA"); // prettier-ignore
+  // Each carries ~19.5 mA, short of the 20 mA a 74LS output warns at.
+  close(-stageCurrent(lo, v), stageCurrent(hi, v) + stageCurrent(ttl, v), 1e-9, "both carry it"); // prettier-ignore
+  assert.ok(stageCurrent(hi, v) < OUTPUT_LIMITS["74LS"].warnMa / 1000, "under 20 mA"); // prettier-ignore
+  assert.ok(!s.warnings.some((w) => w.type === "output-current"));
 });
 
 test("open-collector outputs wired together: a wired-AND (O)", () => {
@@ -357,9 +367,9 @@ test("every net the solve holds has a voltage", () => {
   b.link(u.get(2), u.get(3));
   b.link(u.get(4), u.get(5));
   const { spice, s } = both(b.doc);
-  close(voltsAt(spice, s, u.get(2)), 3.6, 1e-9, "a 74LS HIGH, unloaded");
+  close(voltsAt(spice, s, u.get(2)), 4.51, 1e-6, "a 74LS HIGH, unloaded");
   const low = voltsAt(spice, s, u.get(4));
-  assert.ok(low > 0.15 && low < 0.2, `a LOW, under its own input's current: ${low}`); // prettier-ignore
+  assert.ok(low > 0.2044 && low < 0.22, `a LOW, under its own input's current: ${low}`); // prettier-ignore
   close(voltsAt(spice, s, u.get(14)), 5, 1e-9, "the rail");
   assert.equal(
     voltsAt(spice, s, u.get(9)),
@@ -371,7 +381,9 @@ test("every net the solve holds has a voltage", () => {
 test("solveDrivers balances stages between their open-circuit levels", () => {
   const hi = outputStage(partDef("74LS04"), 5, H);
   const lo = outputStage(partDef("74LS04"), 5, L);
-  close(solveDrivers([hi, lo], 2), (3.6 / 120 + 0.15 / 25) / (1 / 120 + 1 / 25), 1e-9, "a fight"); // prettier-ignore
+  const fight = solveDrivers([hi, lo], 2);
+  close(stageCurrent(hi, fight), -stageCurrent(lo, fight), 1e-9, "a fight");
+  assert.ok(fight > lo.volts && fight < hi.volts, `${fight}`);
   const cmos = outputStage(partDef("CD4069UB"), 5, L);
   const ttl = inputStages(partDef("74LS04"), 5)[0];
   // A saturating stage and a TTL input: still found, from anywhere.
@@ -560,8 +572,8 @@ test("a chip fed through a diode runs at what reaches its pins (F)", () => {
 });
 
 test("a chip powered from another chip's output", () => {
-  // A 74LS HIGH (3.6 V behind 120 Ω) feeding a CD4069UB's VDD: it runs at
-  // what is left after its own supply current.
+  // A 74LS HIGH (4.51 V open) feeding a CD4069UB's VDD: it runs at what is
+  // left after its own supply current.
   const b = bench();
   const ls = inverter(b, "u1", "74LS04", "e10");
   b.gnd(ls.get(1)); // 1Y HIGH: the CMOS part's supply
@@ -572,7 +584,7 @@ test("a chip powered from another chip's output", () => {
   const { s } = both(b.doc);
   const st = s.chipStatus.get("u2");
   assert.equal(st.status, CHIP_STATUS.OK);
-  close(st.volts, 3.6, 1e-3, "3.6 V, less a CMOS part's microamps × 120 Ω");
+  close(st.volts, 4.51, 1e-3, "4.51 V, less a CMOS part's microamps");
 });
 
 test("a chip on the rails is untouched: its supply is its rail's", () => {
@@ -1057,7 +1069,7 @@ test("a part in no family drives the common MOS stage: rail to rail", () => {
     assert.equal(lo.ohms, 100);
   }
   // …and a part of a family keeps its own; the NE555 its sheet's.
-  assert.equal(outputStage(partDef("74LS04"), 5, H).volts, 3.6);
+  assert.equal(outputStage(partDef("74LS04"), 5, H).volts, 4.51);
   close(outputStage(partDef("NE555"), 5, H).volts, 3.65, 1e-9, "the 555");
 });
 

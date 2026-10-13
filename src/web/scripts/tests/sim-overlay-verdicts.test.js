@@ -95,7 +95,7 @@ test("an LED's verdict is kept, and is the one its view was given", () => {
       { [cathode]: "L" },
     ),
   );
-  assert.deepEqual(overlay.ledOf(led.id), { lit: true, burnt: false, level: 1 }); // prettier-ignore
+  assert.deepEqual(overlay.ledOf(led.id), { lit: true, burnt: false, level: null }); // prettier-ignore
   assert.equal(views.get(led.id).seen.lit, true);
   // Straight across two strong nets: burnt, and never lit.
   overlay.apply(
@@ -106,8 +106,29 @@ test("an LED's verdict is kept, and is the one its view was given", () => {
       { [anode]: "H", [cathode]: "L" },
     ),
   );
-  assert.deepEqual(overlay.ledOf(led.id), { lit: false, burnt: true, level: 1 }); // prettier-ignore
+  assert.deepEqual(overlay.ledOf(led.id), { lit: false, burnt: true, level: null }); // prettier-ignore
   assert.equal(views.get(led.id).seen.burnt, true);
+});
+
+test("a lamp the frame averaged is lit at its average; the tick's burn still wins", () => {
+  const { doc, led, digit, views } = desk();
+  const overlay = new SimOverlay(doc, views);
+  const [anode, cathode] = partPinAddresses(doc, led).map((p) => p.address);
+  // The last tick left it dark, but it was lit a fifth of the frame (a PWM).
+  const dark = simState(doc, [led, digit], { [anode]: "L", [cathode]: "L" }, {}); // prettier-ignore
+  overlay.apply({ ...dark, lampGlow: new Map([[led.id, 0.2]]) });
+  assert.deepEqual(overlay.ledOf(led.id), { lit: true, burnt: false, level: 0.2 }); // prettier-ignore
+  assert.equal(views.get(led.id).seen.lit, true);
+  // Nothing averaged: the tick's own picture.
+  overlay.apply({ ...dark, lampGlow: null });
+  assert.equal(overlay.ledOf(led.id).lit, false);
+  // Straight across two strong nets it burns, whatever the average.
+  const shorted = simState(doc, [led, digit], { [anode]: "H", [cathode]: "L" }, { [anode]: "H", [cathode]: "L" }); // prettier-ignore
+  overlay.apply({ ...shorted, lampGlow: new Map([[led.id, 0.5]]) });
+  assert.deepEqual(overlay.ledOf(led.id), { lit: false, burnt: true, level: 0.5 }); // prettier-ignore
+  // A debugger replay pass shows the levels, never an average.
+  overlay.apply({ ...dark, lampGlow: new Map([[led.id, 0.2]]), replay: true });
+  assert.equal(overlay.ledOf(led.id).lit, false);
 });
 
 test("a display's segments are kept per segment", () => {
@@ -127,12 +148,12 @@ test("a display's segments are kept per segment", () => {
   assert.deepEqual(overlay.segmentOf(digit.id, "a"), {
     lit: true,
     burnt: false,
-    level: 1,
+    level: null,
   });
   assert.deepEqual(overlay.segmentOf(digit.id, "b"), {
     lit: false,
     burnt: false,
-    level: 1,
+    level: null,
   });
   assert.equal(views.get(digit.id).seen.segments.get("a"), true);
   assert.equal(overlay.segmentOf(digit.id, "zz"), null);

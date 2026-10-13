@@ -37,6 +37,8 @@ import {
 } from "../sim/spice/leds.js";
 import {
   outputStage,
+  splitterAmps,
+  splitterUnits,
   stageCurrent,
   stageKinks,
   stagePiece,
@@ -142,26 +144,72 @@ test("a verdict: lit, how bright, overdriven, burning, reversed", () => {
 
 // ── Output stages ───────────────────────────────────────────────────────────
 
-test("a 74LS output: VCC − 1.4 V behind 120 Ω HIGH, 0.15 V behind 25 Ω LOW", () => {
+test("a 74LS output: its swept gate's corners, HIGH and LOW", () => {
   const def = partDef("74LS04");
   const high = outputStage(def, 5, "H");
-  close(high.volts, 3.6, 1e-12, "VOH open");
-  // SDLS025D: VOH 3.4 V typ at VCC 4.75 V, IOH −0.4 mA.
-  close(
-    outputStage(def, 4.75, "H").volts - 0.0004 * high.ohms,
-    3.302,
-    1e-9,
-    "VOH",
-  );
-  // IOS 20–100 mA at VCC 5.25 V, shorted.
+  close(high.volts, 4.51, 1e-12, "VOH open: VCC less 0.49 V");
+  close(outputStage(def, 4.75, "H").volts, 4.26, 1e-12, "…at every VCC");
+  // SDLS029C: VOH 3.4 V typ at VCC 4.75 V, IOH −0.4 mA — the fit's 3.37 V.
+  close(stageCurrent(outputStage(def, 4.75, "H"), 4.26 - 0.8862), 0.0004, 1e-9, "VOH"); // prettier-ignore
+  // A light load sits high on the Darlington's knee: 100 kΩ holds it at
+  // 4.18 V (the transistor-level gate's 4.177).
+  close(stageCurrent(high, 4.1789), 4.1789 / 100e3, 1e-4, "100 kΩ");
+  // IOS 20–100 mA at VCC 5.25 V, shorted; 31.8 mA at 5 V.
+  close(stageCurrent(high, 0), 0.0318, 2e-4, "IOS at 5 V");
   const ios = stageCurrent(outputStage(def, 5.25, "H"), 0);
   assert.ok(ios > 0.02 && ios < 0.1, `IOS ${ios}`);
+  close(ios, 0.0338, 2e-4, "IOS at 5.25 V");
+  assert.equal(stageSlope(high, -1), 0, "saturated past its short");
   const low = outputStage(def, 5, "L");
-  // §6.6: VOL 0.25 V typ at 4 mA, 0.35 V at 8 mA.
-  close(-stageCurrent(low, 0.25), 0.004, 1e-9, "4 mA at 0.25 V");
-  close(-stageCurrent(low, 0.35), 0.008, 1e-9, "8 mA at 0.35 V");
-  assert.equal(stageCurrent(high, 4), 0, "a HIGH cannot sink");
+  close(low.volts, 0.2044, 1e-12, "VOL open");
+  // §6.6: VOL 0.25 V typ at 4 mA, 0.35 V at 8 mA — the gate's 0.29 and 0.34.
+  close(-stageCurrent(low, 0.2925), 0.004, 1e-2, "4 mA");
+  close(-stageCurrent(low, 0.3439), 0.008, 1e-2, "8 mA");
+  // All the base drive its pull-down has, from 0.6 V to 1.4 V; and pushed
+  // past the Darlington's emitter, 152 mA — a LOW shorted to VCC smokes.
+  close(-stageCurrent(low, 1), 0.01849, 1e-3, "18.5 mA at 1 V");
+  close(-stageCurrent(low, 5), 0.152, 1e-3, "152 mA shorted to VCC");
+  // Its currents follow VCC (its open level does not): the plateau 16.8 and
+  // 20.2 mA at the sheet's 4.75 and 5.25 V, held outside them.
+  close(-stageCurrent(outputStage(def, 4.75, "L"), 1), 0.01678, 1e-3, "4.75 V");
+  close(-stageCurrent(outputStage(def, 5.25, "L"), 1), 0.02021, 1e-3, "5.25 V");
+  close(-stageCurrent(outputStage(def, 5.5, "L"), 1), 0.02021, 1e-3, "held past 5.25 V"); // prettier-ignore
+  assert.equal(outputStage(def, 5.25, "L").volts, low.volts);
+  assert.equal(stageCurrent(high, 4.6), 0, "a HIGH cannot sink");
   assert.equal(stageCurrent(low, 0.1), 0, "a LOW cannot source");
+  // Monotone: every chord's slope is a conductance, every kink a corner.
+  for (const st of [high, low]) {
+    let was = 0;
+    for (const [d, amps] of st.corners) {
+      assert.ok(amps >= was, `${st.sources ? "HIGH" : "LOW"} at ${d} V`);
+      was = amps;
+    }
+    assert.equal(stageKinks(st).length, st.corners.length);
+  }
+  // A strength moves its currents, never its volts.
+  const twice = outputStage(def, 5, "L", 2);
+  close(-stageCurrent(twice, 0.3439), -2 * stageCurrent(low, 0.3439), 1e-9, "twice the sink"); // prettier-ignore
+  assert.equal(twice.volts, low.volts);
+});
+
+test("a 74LS splitter: the current an input held LOW lets the pull-down take", () => {
+  // Nothing at a grounded input; 15 µA at an LS LOW's 0.2 V, 54 µA at
+  // 0.4 V, whatever the output (1–4 V); falling to nothing as the output
+  // nears its GND.
+  close(splitterAmps(0, 3), 0, 0, "grounded");
+  close(splitterAmps(0.2, 3), 15e-6, 1e-12, "0.2 V");
+  close(splitterAmps(0.4, 1), 53.7e-6, 1e-12, "0.4 V");
+  assert.equal(splitterAmps(0.4, 4), splitterAmps(0.4, 1), "the output's own volts move nothing"); // prettier-ignore
+  close(splitterAmps(0.4, 0.1), 53.7e-6 / 2, 1e-12, "saturating");
+  assert.equal(splitterAmps(0.4, 0), 0);
+  assert.equal(splitterAmps(2, 3), splitterAmps(0.8, 3), "held past VIL");
+  // Only an LS INV or NAND with its family's totem pole carries one.
+  assert.equal(splitterUnits(partDef("74LS04")).length, 6);
+  assert.equal(splitterUnits(partDef("74LS00")).length, 4);
+  assert.equal(splitterUnits(partDef("74LS14")).length, 0, "a Schmitt trigger");
+  assert.equal(splitterUnits(partDef("74LS05")).length, 0, "an open collector");
+  assert.equal(splitterUnits(partDef("74LS08")).length, 0, "an AND");
+  assert.equal(splitterUnits(partDef("CD4069UB")).length, 0, "CMOS");
 });
 
 test("a CD4000 output saturates, by supply", () => {
@@ -370,9 +418,24 @@ test("reversed across 9 V: past its 5 V rating, warned", () => {
   assert.ok(!ok.warnings.some((x) => x.type === "led-reverse"));
 });
 
+/** The current, amps, an LED of `spec` carries straight on a chip output's
+    `stage` — to ground from a HIGH, or from a `volts` supply into a LOW:
+    what the stage delivers at the pin the LED holds (bisected). */
+function ledOnStage(spec, stage, volts = 5) {
+  const pin = (i) => (stage.sources ? ledVoltage(spec, i) : volts - ledVoltage(spec, i)); // prettier-ignore
+  let lo = 0;
+  let hi = 1;
+  for (let k = 0; k < 200; k++) {
+    const mid = (lo + hi) / 2;
+    if (Math.abs(stageCurrent(stage, pin(mid))) > mid) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 test("an output as the stage it is: a 74LS HIGH lights an LED, its LOW burns one", () => {
-  // Sourcing straight into a red LED: 120 Ω is a resistor in all but name —
-  // 3.6 V behind it, 13.8 mA. The digital engine burns it.
+  // Sourcing straight into a red LED: the HIGH's own ~120 Ω past its knee
+  // is a resistor in all but name — 16 mA. The digital engine burns it.
   const b = bench();
   const u = inverter(b, "u1", "74LS04", "e10");
   b.gnd(u.get(1)); // 1Y HIGH
@@ -380,10 +443,14 @@ test("an output as the stage it is: a 74LS HIGH lights an LED, its LOW burns one
   b.link(u.get(2), d.get(1));
   b.gnd(d.get(2));
   const r = spice(b.doc).run(0).result;
-  close(r.lamps.get("d1").amps, ledThrough(RED, 3.6, 120), 1e-6, "13.8 mA");
+  const ls = partDef("74LS04");
+  const lit = ledOnStage(RED, outputStage(ls, 5, "H"));
+  close(r.lamps.get("d1").amps, lit, 1e-6, "16 mA");
+  assert.ok(lit > 0.015 && lit < 0.017, `${lit}`);
   assert.equal(r.lamps.get("d1").burnt, false);
 
-  // Sinking from VCC: 0.15 V behind 25 Ω — 89 mA.
+  // Sinking from VCC: pushed past the Darlington's emitter, the LOW takes
+  // all the LED will — and burns it.
   const s = bench();
   const v = inverter(s, "u1", "74LS04", "e10");
   s.vcc(v.get(1)); // 1Y LOW
@@ -392,7 +459,7 @@ test("an output as the stage it is: a 74LS HIGH lights an LED, its LOW burns one
   s.link(e.get(2), v.get(2));
   const burnt = spice(s.doc).run(0).result;
   const w = burnt.warnings.find((x) => x.type === "led-burnt");
-  close(w.amps, ledThrough(RED, 5 - 0.15, 25), 1e-6, "89 mA");
+  close(w.amps, ledOnStage(RED, outputStage(ls, 5, "L")), 1e-6, "sunk");
 });
 
 test("a CD4000 output at 5 V limits an LED itself; a 555 does not", () => {

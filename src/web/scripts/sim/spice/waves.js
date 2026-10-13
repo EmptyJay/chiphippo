@@ -19,7 +19,8 @@
 
 // spice/waves.js — a clock brick's WAVE under Spice Lite: a triangle, a
 // trapezoid, a sawtooth either way, or a sine, from 0 V to the clock's
-// supply. Pure and DOM-free. (A square and a PWM are LEVELS — the clock's
+// supply — or its Amplitude about its Offset, clipped at the supply's rails
+// (`waveSwing`). Pure and DOM-free. (A square and a PWM are LEVELS — the clock's
 // edges themselves, catalog/parts.js `LEVEL_WAVES` — and never come here.)
 //
 // The clock keeps its square: SimController still flips its level every half
@@ -42,6 +43,12 @@
 // edges: each half is flat, then ramps to the edge, so its flat piece ends
 // part-way through the half, at the foot of the ramp — and the engine, which
 // ends a wave's piece wherever `end` says, asks again there.
+//
+// A clock powered from its supply cannot put out more than its rails, so a
+// swing set past one (an Amplitude too large for its Offset) is CLIPPED
+// there: the piece that would cross a rail ends where it reaches it, and the
+// wave stands flat on the rail (a `"flat"` piece) until it would come back —
+// a sine's crossings found on its own angle, a straight piece's on its line.
 
 import { H } from "../levels.js";
 
@@ -80,45 +87,156 @@ function halfFraction(timing, t) {
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 
-/** A wave's voltage at cycle phase `phase` (0–1), swinging 0 to `high`. */
-export function waveVolts(wave, phase, high) {
+/**
+ * Where a wave runs between, at its clock's supply: `lo` to `hi` — its
+ * Amplitude (peak to peak) about its Offset (its centre), each the whole
+ * supply and half of it while unset — and the rails it is clipped to,
+ * `floor` 0 V and `ceil` the supply.
+ * @param {{amplitude?: number, offset?: number}|null} params - the clock's
+ * @param {number} supply - volts
+ */
+export function waveSwing(params, supply) {
+  const ceil = Math.max(0, supply);
+  const amp = params?.amplitude > 0 ? params.amplitude : ceil;
+  const mid = params?.offset > 0 ? params.offset : ceil / 2;
+  return { lo: mid - amp / 2, hi: mid + amp / 2, floor: 0, ceil };
+}
+
+/** A swing as `waveSwing` states it; a bare number is the whole supply. */
+const asSwing = (swing) =>
+  typeof swing === "number"
+    ? { lo: 0, hi: swing, floor: 0, ceil: swing }
+    : swing;
+
+/** A voltage held to a swing's rails. */
+const clip = (v, s) => Math.min(s.ceil, Math.max(s.floor, v));
+
+/** A wave's shape at cycle phase `phase` (0–1), from 0 to 1. */
+function waveShape(wave, phase) {
   switch (wave) {
     case "triangle":
-      return high * (phase < 0.5 ? 2 * phase : 2 - 2 * phase);
+      return phase < 0.5 ? 2 * phase : 2 - 2 * phase;
     case "trapezoid": {
       const r = TRAPEZOID_RAMP;
       if (phase < 0.5 - r) return 0;
-      if (phase < 0.5) return (high * (phase - (0.5 - r))) / r;
-      if (phase < 1 - r) return high;
-      return (high * (1 - phase)) / r;
+      if (phase < 0.5) return (phase - (0.5 - r)) / r;
+      if (phase < 1 - r) return 1;
+      return (1 - phase) / r;
     }
     case "ramp-up":
-      return high * phase;
+      return phase;
     case "ramp-down":
-      return high * (1 - phase);
+      return 1 - phase;
     case "sine":
-      return (high / 2) * (1 - Math.cos(2 * Math.PI * phase));
+      return (1 - Math.cos(2 * Math.PI * phase)) / 2;
     default:
-      return phase < 0.5 ? 0 : high;
+      return phase < 0.5 ? 0 : 1;
   }
 }
 
 /**
+ * A wave's voltage at cycle phase `phase` (0–1): from `swing.lo` to
+ * `swing.hi`, clipped at its rails (`waveSwing`) — or, a number, from 0 V to
+ * that.
+ * @param {string} wave
+ * @param {number} phase
+ * @param {number|{lo: number, hi: number, floor: number, ceil: number}} swing
+ */
+export function waveVolts(wave, phase, swing) {
+  const s = asSwing(swing);
+  return clip(s.lo + (s.hi - s.lo) * waveShape(wave, phase), s);
+}
+
+/** How near a rail counts as on it, volts. */
+const RAIL_EPS = 1e-12;
+
+/** A straight piece (`raw` at `t`, rising at `slope`) clipped at the rails:
+    flat on a rail it is past (until its line comes back), else the line,
+    ending where it reaches one. */
+function clipLine(gen, raw, slope, s, t) {
+  const tol = RAIL_EPS * Math.max(1, s.ceil);
+  const past = (rail, dir) => (dir > 0 ? raw > rail - tol && (raw > rail + tol || slope > 0) : raw < rail + tol && (raw < rail - tol || slope < 0)); // prettier-ignore
+  for (const [rail, dir] of [
+    [s.ceil, 1],
+    [s.floor, -1],
+  ]) {
+    // prettier-ignore
+    if (!past(rail, dir)) continue;
+    const back = slope * dir < 0 ? t + (rail - raw) / slope : Number.POSITIVE_INFINITY; // prettier-ignore
+    return { ...gen, wave: "flat", value: rail, slope: 0, end: endBy(gen, back) }; // prettier-ignore
+  }
+  let reach = Number.POSITIVE_INFINITY;
+  if (slope > 0) reach = t + (s.ceil - raw) / slope;
+  else if (slope < 0) reach = t + (s.floor - raw) / slope;
+  return { ...gen, value: raw, slope, end: endBy(gen, reach) };
+}
+
+/** A piece's end: its own, or `at` where that comes first — but never a
+    hair before its own (a full swing meets its rail AT the edge, and a
+    float's worth short of it is no corner). */
+function endBy(gen, at) {
+  const eps = 1e-9 * (gen.period > 0 ? gen.period : 1);
+  return at < gen.end - eps ? at : gen.end;
+}
+
+/** The angle past `theta` (radians, increasing) at which `target` comes
+    round next, as time at `omega`. */
+const nextAngle = (theta, target, omega) => {
+  let d = (target - theta) % (2 * Math.PI);
+  if (d < 1e-12) d += 2 * Math.PI;
+  return d / omega;
+};
+
+/** A sine (`mid` − `amp`·cos θ, at angle `theta`, turning at `omega`)
+    clipped at the rails: flat on a rail it is past, until it comes back;
+    else the sine, ending where it next reaches one. */
+function clipSine(gen, mid, amp, theta, omega, s, t) {
+  const raw = mid - amp * Math.cos(theta);
+  const aux = amp * Math.sin(theta);
+  const sine = { ...gen, value: raw, mid, aux, omega, slope: 0 };
+  if (!(amp > 0) || !(omega > 0)) return { ...sine, value: clip(raw, s), omega: 0 }; // prettier-ignore
+  const tol = RAIL_EPS * Math.max(1, s.ceil);
+  // Above the ceiling for θ in (acos c, 2π − acos c), c = (mid − ceil)/amp;
+  // below the floor for θ in (−acos f, acos f), f = (mid − floor)/amp.
+  const over = mid + amp > s.ceil ? Math.acos(Math.max(-1, Math.min(1, (mid - s.ceil) / amp))) : null; // prettier-ignore
+  const under = mid - amp < s.floor ? Math.acos(Math.max(-1, Math.min(1, (mid - s.floor) / amp))) : null; // prettier-ignore
+  if (over != null && (raw > s.ceil + tol || (raw > s.ceil - tol && aux > 0))) {
+    const back = t + nextAngle(theta, 2 * Math.PI - over, omega);
+    return { ...gen, wave: "flat", value: s.ceil, slope: 0, end: endBy(gen, back) }; // prettier-ignore
+  }
+  if (
+    under != null &&
+    (raw < s.floor - tol || (raw < s.floor + tol && aux < 0))
+  ) {
+    const back = t + nextAngle(theta, under, omega);
+    return { ...gen, wave: "flat", value: s.floor, slope: 0, end: endBy(gen, back) }; // prettier-ignore
+  }
+  let reach = Number.POSITIVE_INFINITY;
+  if (over != null) reach = Math.min(reach, t + nextAngle(theta, over, omega));
+  if (under != null) reach = Math.min(reach, t + nextAngle(theta, 2 * Math.PI - under, omega)); // prettier-ignore
+  return { ...sine, end: endBy(gen, reach) };
+}
+
+/**
  * What a wave runs along from `t` until its next edge (a trapezoid's, its
- * next corner): `{value, end, running}` and how it moves — `slope` (V/s)
- * for a straight piece; for a
- * sine its quadrature `aux` (V), `omega` (rad/s) and `mid` (V), v' = ω·aux,
- * aux' = −ω·(v − mid). `period` is the clock's (seconds). A held clock, or
- * one past its half's end, stands still (`running` false, slope and omega 0).
+ * next corner, or where it meets a rail): `{value, end, running}` and how it
+ * moves — `slope` (V/s) for a straight piece (and a `"flat"` one, standing
+ * on a rail); for a sine its quadrature `aux` (V), `omega` (rad/s) and
+ * `mid` (V), v' = ω·aux, aux' = −ω·(v − mid). `period` is the clock's
+ * (seconds). A held clock, or one past its half's end, stands still
+ * (`running` false, slope and omega 0).
  * @param {string} wave
  * @param {string} level - H or L
  * @param {{half: number, since?: number, frac?: number}|undefined} timing
- * @param {number} high - the clock's supply, volts
+ * @param {number|object} swing - `waveSwing`'s; a number, 0 V to it
  * @param {number} t - seconds
  */
-export function waveGenerator(wave, level, timing, high, t) {
+export function waveGenerator(wave, level, timing, swing, t) {
+  const s = asSwing(swing);
+  const span = s.hi - s.lo;
   const phase = cyclePhase(level, timing, t);
-  const value = waveVolts(wave, phase, high);
+  const raw = s.lo + span * waveShape(wave, phase);
+  const value = clip(raw, s);
   const half = timing?.half ?? 0;
   const period = 2 * half;
   const end =
@@ -127,30 +245,26 @@ export function waveGenerator(wave, level, timing, high, t) {
       : Number.POSITIVE_INFINITY;
   const running = Number.isFinite(end) && t < end;
   const gen = { wave, value, end: running ? end : Number.POSITIVE_INFINITY, running, period }; // prettier-ignore
-  if (wave === "trapezoid" && running) {
+  if (!running) {
+    return wave === "sine"
+      ? { ...gen, mid: (s.lo + s.hi) / 2, aux: 0, omega: 0, slope: 0 }
+      : { ...gen, slope: 0 };
+  }
+  if (wave === "trapezoid") {
     // Flat to the foot of the ramp, then the ramp to the edge.
     const corner = timing.since + (1 - 2 * TRAPEZOID_RAMP) * half;
-    if (t < corner - CORNER_EPS * half) return { ...gen, end: corner, slope: 0 }; // prettier-ignore
-    const ramp = high / (TRAPEZOID_RAMP * period);
-    return { ...gen, slope: level === H ? -ramp : ramp };
+    if (t < corner - CORNER_EPS * half) return clipLine({ ...gen, end: corner }, raw, 0, s, t); // prettier-ignore
+    const ramp = span / (TRAPEZOID_RAMP * period);
+    return clipLine(gen, raw, level === H ? -ramp : ramp, s, t);
   }
   if (wave === "sine") {
-    const amp = high / 2;
-    return {
-      ...gen,
-      mid: amp,
-      aux: amp * Math.sin(2 * Math.PI * phase),
-      omega: running ? (2 * Math.PI) / period : 0,
-      slope: 0,
-    };
+    return clipSine(gen, (s.lo + s.hi) / 2, span / 2, 2 * Math.PI * phase, (2 * Math.PI) / period, s, t); // prettier-ignore
   }
   let slope = 0;
-  if (running) {
-    if (wave === "triangle") slope = ((level === H ? -2 : 2) * high) / period;
-    else if (wave === "ramp-up") slope = high / period;
-    else if (wave === "ramp-down") slope = -high / period;
-  }
-  return { ...gen, slope };
+  if (wave === "triangle") slope = ((level === H ? -2 : 2) * span) / period;
+  else if (wave === "ramp-up") slope = span / period;
+  else if (wave === "ramp-down") slope = -span / period;
+  return clipLine(gen, raw, slope, s, t);
 }
 
 /** Which way a wave is heading as its generator starts: +1, −1 or 0. */

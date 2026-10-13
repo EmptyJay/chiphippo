@@ -29,6 +29,7 @@ import { DeskDoc, normalizeDocument } from "../model/desk-doc.js";
 import { regulatorFacts, regulatorVolts } from "../sim/regulators.js";
 import { coilOf } from "../sim/spice/inductors.js";
 import { buildNetlist } from "../sim/netlist.js";
+import { OPTO_TRANSFER, optoTransfer } from "../sim/spice/analog-devices.js";
 import { bench, runner } from "./timing-fixtures.js";
 
 /** A net's voltage on the last tick, by one of its holes. */
@@ -99,9 +100,10 @@ for (const [ref, pins] of [
     // 12 V through 470 Ω: IF ≈ 23 mA, past the 12 mA the 1 kΩ lets through
     // — saturated.
     assert.ok(collector(470, 100) < 0.5);
-    // Through 4.7 kΩ, IF ≈ 2.3 mA: at 100 % the transistor carries about
-    // that, and the collector sits near 12 − 2.3 = 9.7 V; at 300 % three
-    // times as much; dark, nothing at all.
+    // Through 4.7 kΩ, IF ≈ 2.3 mA, where the CTR has fallen to about 0.74 of
+    // its setting (spice/analog-devices.js OPTO_TRANSFER): at 100 % the
+    // transistor carries about 1.7 mA, and the collector sits near
+    // 12 − 1.7 = 10.3 V; at 300 % three times as much; dark, nothing at all.
     const at100 = collector(4700, 100);
     assert.ok(at100 > 9 && at100 < 10.5, `CTR-limited: ${at100} V`);
     const at300 = collector(4700, 300);
@@ -109,6 +111,30 @@ for (const [ref, pins] of [
     assert.ok(collector(470, 100, L) > 11.9, "dark: open");
   });
 }
+
+test("an optocoupler's CTR falls below 5 mA of LED current, one curve for both", () => {
+  // The two sheets' curves, each relative to its own 5 mA, meet in their
+  // mean: 0.51 at 1 mA, 0.32 at 0.5 mA, 0.09 at 0.1 mA; the CTR set holds
+  // from 5 mA up.
+  const rel = (ma) => optoTransfer(ma / 1000) / (ma / 1000);
+  for (const [ma, want] of [
+    [0.1, 0.09],
+    [0.5, 0.32],
+    [1, 0.51],
+    [2, 0.725],
+    [5, 1],
+    [10, 1],
+    [40, 1],
+  ]) {
+    // prettier-ignore
+    assert.ok(Math.abs(rel(ma) - want) < 1e-9, `${ma} mA: ${rel(ma)}`);
+  }
+  assert.equal(optoTransfer(0), 0, "dark");
+  // What it carries only ever rises with the LED's current.
+  for (let k = 1; k < OPTO_TRANSFER.length; k++) {
+    assert.ok(OPTO_TRANSFER[k][1] > OPTO_TRANSFER[k - 1][1]);
+  }
+});
 
 test("an optocoupler's CTR is stored only off its default", () => {
   const def = partDef("4N35");

@@ -110,22 +110,31 @@ function runTo(sim, r, until) {
   return r;
 }
 
-/** A powered 74LS input's stage (spice/params.js TTL_INPUT): a constant
-    current OUT of its pin below its 0.9 V knee, falling to none at 1.3 V. */
+/** A powered 74LS input's stage (spice/params.js TTL_INPUT): current OUT of
+    its pin along its swept table's chords, to none at its 1.1 V. */
 const [TTL_BIAS] = inputStages(partDef("74LS04"), 5);
-const TTL_KNEE = TTL_BIAS.volts - TTL_BIAS.limit * TTL_BIAS.ohms;
+/** Its corners as pin voltages, rising: where a node charging through it
+    bends — and is linearized again. */
+const TTL_CORNERS = TTL_BIAS.corners
+  .map(([d]) => TTL_BIAS.volts - d)
+  .filter((v) => v > 0)
+  .sort((a, b) => a - b);
 
 /**
  * An RC node (conductance `g0` to a source pushing `i0` in, capacitance `c`)
  * charging from 0 V with a 74LS input on it: the time it reaches `v`, through
- * the input's knee and its 1.3 V — each segment a plain exponential.
+ * each of the input's corners — between them the input is a chord, so each
+ * segment is a plain exponential.
  */
 function ttlRc({ g0, i0, c }) {
-  const segments = [
-    { to: TTL_KNEE, g: g0, i: i0 + TTL_BIAS.limit },
-    { to: TTL_BIAS.volts, g: g0 + 1 / TTL_BIAS.ohms, i: i0 + TTL_BIAS.volts / TTL_BIAS.ohms }, // prettier-ignore
-    { to: Infinity, g: g0, i: i0 },
-  ];
+  const ends = [...TTL_CORNERS, Infinity];
+  const segments = ends.map((to, k) => {
+    const lo = k ? ends[k - 1] : 0;
+    const hi = Number.isFinite(to) ? to : lo + 1;
+    const [ia, ib] = [stageCurrent(TTL_BIAS, lo), stageCurrent(TTL_BIAS, hi)];
+    const slope = (ib - ia) / (hi - lo);
+    return { to, g: g0 - slope, i: i0 + ia - slope * lo };
+  });
   return {
     at(v) {
       let t = 0;
@@ -148,6 +157,23 @@ function ttlRc({ g0, i0, c }) {
       return i0 / g0;
     },
   };
+}
+
+/** Runs `sim` on from `r` through the input's corners below `v`, its node's
+    curve (`net`) timed from where it starts: every wake before `v` is one of
+    them, exactly (a tick runs a corner close behind another inside itself —
+    the fast first ones, the 20 mV of its switch). Returns the last result
+    and `at(x)`, the moment the node reaches `x`. */
+function throughCorners(sim, r, net, rc, v, tol = 1e-5) {
+  const { t0, v0 } = r.analog.nodes.get(net).curve;
+  const at = (x) => t0 + rc.at(x) - rc.at(v0);
+  const ahead = TTL_CORNERS.filter((x) => x > v0 + 1e-9 && x < v);
+  while (r.wakeAt < at(v) * (1 - tol)) {
+    const near = ahead.find((x) => Math.abs(r.wakeAt - at(x)) <= at(x) * tol);
+    assert.ok(near != null, `a wake at ${r.wakeAt} s is at one of the input's corners`); // prettier-ignore
+    r = sim.run(r.wakeAt).result;
+  }
+  return { r, at };
 }
 
 test("an RC node charges, and the gate flips when it crosses the threshold", () => {
@@ -227,23 +253,19 @@ test("listeners with different thresholds each switch at their own crossing", ()
   b.gnd(cap.get(2));
   b.link(ls.get(1), cmos.get(1));
 
-  // Below 1.3 V the 74LS input pushes its own current into the node too —
-  // flat to its 0.9 V knee, then falling — so the first stretches run faster
-  // than R·C, a corner at each, and from 1.3 V at R·C toward 5 V.
+  // Below 1.1 V the 74LS input pushes its own current into the node too —
+  // falling along its table — so the first stretches run faster than R·C, a
+  // corner at each, and from 1.1 V at R·C toward 5 V.
   const rc = ttlRc({ g0: 1 / 10e3, i0: 5 / 10e3, c: 10e-6 });
-  const tLs = rc.at(1.4);
   const tCmos = rc.at(2.5); // VIL 1.5 / VIH 3.5 at 5 V
   const sim = spice(b.doc);
-  let r = sim.run(0).result;
-  close(r.wakeAt, rc.at(TTL_KNEE), 1e-5, "woken at the knee, to run on from there"); // prettier-ignore
-  r = sim.run(r.wakeAt).result;
-  close(r.wakeAt, rc.at(TTL_BIAS.volts), 1e-5, "and at the input's 1.3 V");
-  r = sim.run(r.wakeAt).result;
-  close(r.wakeAt, tLs, 1e-5, "the 74LS crossing first");
+  const nodeNet = sim.netlist.netOfPoint.get(b.at(ls.get(1)));
+  const run = throughCorners(sim, sim.run(0).result, nodeNet, rc, 1.4);
+  let r = run.r;
+  close(r.wakeAt, run.at(1.4), 1e-5, "the 74LS crossing first");
   r = sim.run(r.wakeAt).result;
   assert.equal(sim.level(ls.get(2)), L);
   assert.equal(sim.level(cmos.get(2)), H, "the CMOS input has not crossed yet");
-  const nodeNet = sim.netlist.netOfPoint.get(b.at(ls.get(1)));
   assert.equal(
     r.netLevels.get(nodeNet),
     "X",
@@ -547,10 +569,11 @@ test("a late tick replays a slow oscillator's crossings without calling it an os
 });
 
 test("a 74LS14 cannot run an RC oscillator through 10 kΩ: its input holds the capacitor up", () => {
-  // Output LOW is 0.15 V behind 25 Ω, but below 1.3 V the input pushes its
-  // own current back into the capacitor: through 10 kΩ the node comes to
-  // rest near 0.94 V — above VT− 0.8 V — so the '14 never turns back. A
-  // real '14 oscillator wants R of a kilohm or so, for this very reason.
+  // Output LOW is 0.2 V, but below 1.1 V the input pushes its own current
+  // back into the capacitor: through 10 kΩ the node comes to rest at the
+  // input's switch, near 1.08 V — above VT− 0.8 V — so the '14 never turns
+  // back. A real '14 oscillator wants R of a kilohm or so, for this very
+  // reason.
   const { b, u } = relaxation("74LS14", { r: 10e3, c: 10e-6 });
   const sim = spice(b.doc);
   let r = sim.run(0).result;
@@ -566,7 +589,7 @@ test("a 74LS14 cannot run an RC oscillator through 10 kΩ: its input holds the c
   assert.equal(edges, 1, "it turns LOW once, and stays there");
   assert.equal(level, L);
   const node = sim.netlist.netOfPoint.get(b.at(u.get(1)));
-  const rest = ttlRc({ g0: 1 / (10e3 + 25), i0: 0.15 / (10e3 + 25), c: 1 }).rest(); // prettier-ignore
+  const rest = ttlRc({ g0: 1 / 10e3, i0: 0.2044 / 10e3, c: 1 }).rest();
   close(r.nodeVolts.get(node), rest, 0.011, "at rest above VT−");
   assert.ok(rest > 0.8);
 });
@@ -623,33 +646,33 @@ test("a capacitor whose other lead goes nowhere is no part of the node", () => {
   );
 });
 
-test("a 74LS input on an RC pushes its own current into it below 1.3 V", () => {
-  // The same 10 kΩ / 10 µF into a 74LS04: from 0 V to the input's 0.9 V knee
-  // the input sources its 0.2 mA into the capacitor alongside the resistor,
-  // then less and less to its 1.3 V, and from there the resistor charges it
-  // alone — a corner at each, where the curve is linearized again.
+test("a 74LS input on an RC pushes its own current into it below 1.1 V", () => {
+  // The same 10 kΩ / 10 µF into a 74LS04: from 0 V the input sources its
+  // ~0.23 mA into the capacitor alongside the resistor, less and less along
+  // its table to its 1.1 V, and from there the resistor charges it alone — a
+  // corner at each, where the curve is linearized again.
   const { b, u } = rcInto();
   const rc = ttlRc({ g0: 1 / 10e3, i0: 5 / 10e3, c: 10e-6 });
   const crossing = rc.at(TTL_TRIGGER);
   assert.ok(crossing < 0.1 * Math.log(5 / (5 - TTL_TRIGGER)), "sooner than R·C alone"); // prettier-ignore
   const sim = spice(b.doc);
-  let r = sim.run(0).result;
-  close(r.wakeAt, rc.at(TTL_KNEE), 1e-5, "the knee");
   const node = sim.netlist.netOfPoint.get(b.at(u.get(1)));
-  r = sim.run(r.wakeAt).result;
-  close(r.nodeVolts.get(node), TTL_KNEE, 1e-6, "at the input's knee");
-  close(r.wakeAt, rc.at(TTL_BIAS.volts), 1e-5, "the input's own 1.3 V");
-  r = sim.run(r.wakeAt).result;
-  close(r.nodeVolts.get(node), 1.3, 1e-6, "at the input's own 1.3 V");
-  close(r.wakeAt, crossing, 1e-5, "the crossing, on the resistor alone");
+  let r = sim.run(0).result;
+  const { t0 } = r.analog.nodes.get(node).curve;
+  for (const corner of TTL_CORNERS) {
+    close(r.wakeAt, t0 + rc.at(corner), 1e-5, `woken at its ${corner.toFixed(3)} V corner`); // prettier-ignore
+    r = sim.run(r.wakeAt).result;
+    close(r.nodeVolts.get(node), corner, 1e-4, "at the corner");
+  }
+  close(r.wakeAt, t0 + crossing, 1e-5, "the crossing, on the resistor alone");
   sim.run(r.wakeAt);
   assert.equal(sim.level(u.get(2)), L);
 });
 
 test("a 74LS input under a stiff divider: its own current lifts the node", () => {
   // 10k to VCC and 2.2k to GND would hold an open node at 0.90 V; the 74LS
-  // input's current out of the pin lifts it to ~1.09 V — still LOW to the
-  // gate, and short of its 1.4 V trigger, so it is released.
+  // input's current out of the pin lifts it to its switch, ~1.08 V — short of
+  // its 1.4 V trigger, so the gate reads it LOW.
   const { b, u } = rcInto();
   const down = b.seat("r2", "resistor", "a50", { ohms: 2.2e3 });
   b.link(down.get(1), u.get(1));
@@ -664,8 +687,9 @@ test("a 74LS input under a stiff divider: its own current lifts the node", () =>
 
 test("a node reads a HIGH as its driver's supply, not the desk's highest", () => {
   // A 74LS04 on 5 V charges an RC that a CD4069UB on 12 V reads: the node
-  // can climb only to the 3.6 V its driver's HIGH stage reaches (VCC less
-  // two VBE), short of the CMOS gate's 6 V — the reason a 5 V part cannot
+  // can climb only to the 4.51 V its driver's HIGH stage reaches unloaded
+  // (VCC less 0.49 V — the last of it slowly, along the Darlington's soft
+  // knee), short of the CMOS gate's 6 V — the reason a 5 V part cannot
   // drive 12 V CMOS.
   const b = bench();
   const last = () => b.doc.wires[b.doc.wires.length - 1];
@@ -686,12 +710,12 @@ test("a node reads a HIGH as its driver's supply, not the desk's highest", () =>
   b.gnd(cap.get(2));
   const sim = spice(b.doc);
   let r = sim.run(0).result;
-  for (let i = 0; i < 100 && nextOf(r) != null; i++)
+  for (let i = 0; i < 1000 && nextOf(r) != null; i++)
     r = sim.run(nextOf(r)).result;
   assert.equal(r.wakeAt, null, "it arrives, and nothing crosses");
   assert.equal(r.frameAt, null);
   const node = sim.netlist.netOfPoint.get(b.at(cmos.get(1)));
-  close(r.nodeVolts.get(node), 3.6, 0.011, "at its driver's 3.6 V HIGH");
+  close(r.nodeVolts.get(node), 4.51, 0.011, "at its driver's 4.51 V HIGH");
   assert.equal(sim.level(cmos.get(2)), H, "the 12 V gate never switches");
 });
 
@@ -861,15 +885,12 @@ test("a CD4066 channel at 5 V carries a rail onto a capacitor, through its on-re
   let r = sim.run(0).result;
   assert.equal(sim.level(u.get(2)), H, "the empty capacitor reads LOW");
   const net = sim.netlist.netOfPoint.get(b.at(s.get(2)));
-  const t0 = r.analog.nodes.get(net).curve.t0;
-  // Below 1.3 V the 74LS input's own current joins the switch's (470 Ω):
-  // a corner at its knee and at its 1.3 V, then the gate's 1.4 V.
+  // Below 1.1 V the 74LS input's own current joins the switch's (470 Ω):
+  // a corner at each of its table's, then the gate's 1.4 V.
   const rc = ttlRc({ g0: 1 / 470, i0: 5 / 470, c: 1e-6 });
-  close(r.wakeAt, t0 + rc.at(TTL_KNEE), 1e-9, "the input's knee");
-  r = sim.run(r.wakeAt).result;
-  close(r.wakeAt, t0 + rc.at(TTL_BIAS.volts), 1e-9, "the input's 1.3 V");
-  r = sim.run(r.wakeAt).result;
-  close(r.wakeAt, t0 + rc.at(1.4), 1e-9, "the gate's crossing");
+  const run = throughCorners(sim, r, net, rc, 1.4, 1e-9);
+  r = run.r;
+  close(r.wakeAt, run.at(1.4), 1e-9, "the gate's crossing");
   r = sim.run(r.wakeAt).result;
   assert.equal(sim.level(u.get(2)), L, "crossed");
   r = runTo(sim, r, 1);

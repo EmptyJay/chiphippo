@@ -1,7 +1,7 @@
 {
   "area": "led",
   "title": "LEDs",
-  "ngspice": "ngspice-42",
+  "ngspice": "ngspice-44.2",
   "cases": {
     "led-red-10k": {
       "reference": "device",

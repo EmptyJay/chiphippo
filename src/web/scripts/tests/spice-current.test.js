@@ -84,8 +84,8 @@ const spiceRun = (doc, spice = null) =>
 
 /** Where a node settles that `into(v)` pushes current into (negative:
     draws it out), with `n` powered 74LS inputs on it — each its stage
-    (spice/params.js TTL_INPUT: a constant current out of the pin to its
-    0.9 V knee, falling to none at 1.3 V). Bisected: the stage only falls. */
+    (spice/params.js TTL_INPUT: current out of the pin along its swept
+    table, to none at 1.1 V). Bisected: the stage only falls. */
 function ttlHeldBy(into, n) {
   const [bias] = inputStages(partDef("74LS04"), 5);
   let lo = 0;
@@ -144,15 +144,23 @@ function pulledDown(ohms) {
 }
 
 test("a brownout: an output whose load holds its net where its inputs misread it", () => {
-  // A 74LS HIGH (3.6 V behind 120 Ω) into 100 Ω to GND sits at about 1.6 V
-  // — in the undefined band of the input reading it. A warning; the 16 mA
-  // through the pin is within its 20 mA, so nothing smokes.
+  // A 74LS HIGH into 100 Ω to GND sits at about 1.76 V, where its stage
+  // delivers what 100 Ω takes — in the undefined band of the input reading
+  // it. A warning; the 17.6 mA through the pin is within its 20 mA, so
+  // nothing smokes.
   const { b, u } = pulledDown(100);
   const sim = runner(b.doc, { engine: "spice" });
   const r = sim.run(0).result;
   const net = sim.netlist.netOfPoint.get(b.at(u.get(2)));
   const v = r.nodeVolts.get(net);
-  close(v, (3.6 * 100) / 220, 1e-3, "the divider");
+  const high = outputStage(partDef("74LS04"), 5, H);
+  let [lo, hi] = [0, 5];
+  for (let k = 0; k < 100; k++) {
+    const mid = (lo + hi) / 2;
+    if (stageCurrent(high, mid) > mid / 100) lo = mid;
+    else hi = mid;
+  }
+  close(v, lo, 1e-3, "the stage into 100 Ω");
   const w = r.warnings.find((x) => x.type === "brownout");
   assert.ok(w, "brownout");
   assert.equal(w.chip, "u1");
@@ -171,15 +179,15 @@ test("a brownout: an output whose load holds its net where its inputs misread it
 });
 
 test("an output that never reaches an input's threshold is no brownout", () => {
-  // A 74LS HIGH's 3.6 V into a CMOS input whose VIH is set to 4 V: it is
-  // short of it unloaded too, so no load is to blame (it reads unknown all
-  // the same).
+  // A 74LS HIGH's 4.51 V into a CMOS input whose VIH is set to 4.6 V: it
+  // is short of it unloaded too, so no load is to blame (it reads unknown
+  // all the same).
   const b = bench();
   const u = inverter(b, "u1", "74LS04", "e10");
   b.gnd(u.get(1));
   const c = inverter(b, "u2", "CD4069UB", "e20");
   b.link(u.get(2), c.get(1));
-  const spice = { families: { CD4000: { vihV: 4 } } };
+  const spice = { families: { CD4000: { vihV: 4.6 } } };
   const sim = runner(b.doc, { engine: "spice", spice });
   const r = sim.run(0).result;
   assert.equal(sim.level(u.get(2)), "X", "the CMOS input reads it unknown");
@@ -240,12 +248,17 @@ test("the family's source and sink currents are its output stage's strength", ()
 test("the family's IIL is its 74LS input's bias; a CMOS input's leaks only when set", () => {
   const ls = partDef("74LS04");
   const [bias] = inputStages(ls, 5);
-  close(bias.limit, TTL_INPUT.typicalUa / 1e6, 1e-12, "the default: 200 µA");
-  close(bias.volts - bias.limit * bias.ohms, TTL_INPUT.kneeV, 1e-12, "flat to 0.9 V"); // prettier-ignore
+  // The swept gate's, at the sheet's IIL test point: 188 µA at 0.4 V (max
+  // 400), 227 at 0 V, none past its 1.1 V switch.
+  close(stageCurrent(bias, 0.4), 188e-6, 2e-3, "the default at 0.4 V");
+  close(stageCurrent(bias, 0), 226.9e-6, 2e-3, "at 0 V");
+  assert.equal(stageCurrent(bias, TTL_INPUT.volts + 0.1), 0, "let go");
+  close(stageCurrent(inputStages(ls, 5.25)[0], 0.4), 200.4e-6, 2e-3, "more at 5.25 V"); // prettier-ignore
   const own = normalizeSpiceConfig({ families: { "74LS": { inputLowUa: 800 } } }); // prettier-ignore
   const twice = inputStages(ls, 5, own)[0];
-  close(twice.limit, (2 * TTL_INPUT.typicalUa) / 1e6, 1e-12, "twice the IIL");
-  close(twice.volts - twice.limit * twice.ohms, TTL_INPUT.kneeV, 1e-12, "its knee where it was"); // prettier-ignore
+  for (const v of [0, 0.4, 0.9, 1.09]) {
+    close(stageCurrent(twice, v), 2 * stageCurrent(bias, v), 1e-12, `twice the IIL at ${v} V`); // prettier-ignore
+  }
   const cmos = partDef("CD4069UB");
   assert.equal(inputStages(cmos, 5).length, 2, "its two diodes, no leak");
   const leaky = normalizeSpiceConfig({ families: { CD4000: { inputLowUa: 1 } } }); // prettier-ignore
@@ -328,16 +341,19 @@ function ledThrough(spec, volts, ohms) {
 
 /** The current, amps, an LED of `spec` carries in series with `ohms` from a
     `volts` supply through a chip output's `stage`, sourcing or sinking: the
-    stage delivers I with what the LED and the resistor leave it,
-    volts − V(I) − I·ohms (bisected — that only falls as I rises). */
+    stage delivers I at the pin the LED and the resistor hold — V(I) + I·ohms
+    above ground, or that below the supply (bisected — what it delivers
+    there only falls as I rises). */
 function ledThroughStage(spec, volts, ohms, stage) {
-  const delivers = (d) =>
-    Math.abs(stageCurrent(stage, stage.sources ? stage.volts - d : stage.volts + d)); // prettier-ignore
+  const pin = (i) => {
+    const across = ledVoltage(spec, i) + i * ohms;
+    return stage.sources ? across : volts - across;
+  };
   let lo = 0;
   let hi = volts / ohms;
   for (let k = 0; k < 200; k++) {
     const mid = (lo + hi) / 2;
-    if (delivers(volts - ledVoltage(spec, mid) - mid * ohms) > mid) lo = mid;
+    if (Math.abs(stageCurrent(stage, pin(mid))) > mid) lo = mid;
     else hi = mid;
   }
   return (lo + hi) / 2;
@@ -345,15 +361,16 @@ function ledThroughStage(spec, volts, ohms, stage) {
 
 test("a chip output's lamp is booked to the supply, as the stage it is", () => {
   // The supply reading takes the LED's network as spice/lamps.js solves it:
-  // the output as its family's stage (spice/output-stage.js — a 74LS HIGH
-  // is VCC − 1.4 V behind 120 Ω, its LOW 0.15 V behind 25 Ω; a CD4000
-  // output 400 Ω at the rail at 5 V and 232 Ω at 9 V, bending as a square
-  // law to its saturation current), the LED its datasheet's curve.
-  const cmos = (volts, level) =>
-    ledThroughStage(RED, volts, 1e3, outputStage(partDef("CD4069UB"), volts, level)); // prettier-ignore
+  // the output as its family's stage (spice/output-stage.js — a 74LS one
+  // its swept gate's corners; a CD4000 output 400 Ω at the rail at 5 V and
+  // 232 Ω at 9 V, bending as a square law to its saturation current), the
+  // LED its datasheet's curve.
+  const through = (ref, volts, level) =>
+    ledThroughStage(RED, volts, 1e3, outputStage(partDef(ref), volts, level)); // prettier-ignore
+  const cmos = (volts, level) => through("CD4069UB", volts, level);
   for (const [ref, volts, sink, led] of [
-    ["74LS04", 5, false, ledThrough(RED, 5 - 1.4, 120 + 1e3)],
-    ["74LS04", 5, true, ledThrough(RED, 5 - 0.15, 1e3 + 25)],
+    ["74LS04", 5, false, through("74LS04", 5, H)],
+    ["74LS04", 5, true, through("74LS04", 5, L)],
     ["CD4069UB", 5, false, cmos(5, H)],
     ["CD4069UB", 5, true, cmos(5, L)],
     ["CD4069UB", 9, false, cmos(9, H)],

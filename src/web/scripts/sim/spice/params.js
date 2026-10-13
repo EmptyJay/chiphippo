@@ -60,14 +60,13 @@ export const FAMILY_DEFAULTS = Object.freeze({
     // SDLS025D §6.9: tPLH 9 ns typ, tPHL 10 ns typ — the slower edge.
     delayNs: 10,
     // §6.5, SN74LS00: IOH −0.4 mA (VOH test current), IOL 8 mA — the points
-    // its output stage (spice/output-stage.js) is drawn through.
+    // its output stage's table (spice/output-stage.js) was fitted at.
     sourceMa: 0.4,
     sinkMa: 8,
     // §6.5: IIL −0.4 mA max (VI = 0.4 V), the sheet's only figure. The
-    // input's bias (`TTL_INPUT`) pushes out half of it below 0.9 V,
-    // typical. (Its IIH, 20 µA max at 2.7 V, is a diode's reverse leakage —
-    // typically a small fraction of that, and nothing the solve draws: no
-    // field.)
+    // input's bias (`TTL_INPUT`) pushes out 188 µA there, typical. (Its
+    // IIH, 20 µA max at 2.7 V, is a diode's reverse leakage — typically a
+    // small fraction of that, and nothing the solve draws: no field.)
     inputLowUa: 400,
     // §6.5: ICCH 0.8 mA typ, ICCL 2.4 mA typ — per PACKAGE; their mean, for a
     // package whose gates sit half HIGH and half LOW.
@@ -136,27 +135,32 @@ export const BODY_DIODE = Object.freeze({ kneeV: 0.6, rdOhm: 2 });
 /**
  * A 74LS input as the circuit it is (spice/network.js's one-terminal
  * driver): while it is held LOW it pushes current OUT of the pin — from VCC
- * through its own ~20 kΩ input resistor and a Schottky diode — and lets go as
- * the pin rises past its threshold. Two segments, as that structure draws
- * them (features/done/spice-lite-3-plan.md, Phase 4): a near-constant current —
- * VCC less a diode, over 20 kΩ — up to `kneeV` 0.9 V, where the node behind
- * the diode reaches the two base–emitter drops of the gate's own transistors
- * and the current starts to transfer to them, then falling in a straight line
- * to nothing at `volts` 1.3 V, the gate's typical switching point. The flat
- * part is `typicalUa` 200 µA: half the sheet's IIL (SN74LS00, SDLS025:
- * −0.4 mA max at VI = 0.4 V), what the 20 kΩ drives. So a pull-down of 1 kΩ
- * holds the pin at 0.2 V (LOW), 2 kΩ at 0.4 V — and 4.7 kΩ at 0.91 V and
- * 10 kΩ at 1.08 V, both inside the undefined band: why a 74LS input is never
- * pulled down through more than a couple of kilohms on a real bench. (One
- * straight line through the same two points, which this replaced, held a
- * 4.7 kΩ pull-down at a clean 0.66 V.) A CMOS or MOS input draws next to
- * nothing, and has no such stage.
+ * through its own 20 kΩ input resistor and a Schottky diode — and lets go as
+ * the pin rises past the gate's switching point. Not a line but its TABLE,
+ * like the output's (spice/output-stage.js): the input of the sheet's own
+ * schematic (scripts/spice-deck.mjs `lsGate`) swept in ngspice, read off at
+ * the corners where it bends (2026-10-13). `ua` is [volts below `volts`,
+ * µA] at VCC = 5 V: 227 µA at 0 V, falling ~125 µA/V as the pin rises (the
+ * 20 kΩ, less what the 12 kΩ beside it takes once the node behind the diode
+ * climbs), to 109 µA at 1.08 V — where the gate switches and the current
+ * transfers to its own transistors at once, to nothing by `volts` 1.1 V.
+ * The supply moves every point by `vccUaPerV` (the 20 kΩ: within 0.3 µA over
+ * 4.75–5.25 V); the switch stays put (1.08–1.10 V). So a pull-down of 1 kΩ
+ * holds the pin at 0.21 V, 2 kΩ at 0.38 V and 4.7 kΩ at 0.70 V (LOW) — and
+ * 10 kΩ at the switch, 1.09 V, inside the undefined band: why a 74LS input
+ * is never pulled down through more than a few kilohms on a real bench. (A
+ * flat 200 µA to 0.9 V, which this replaced, read a 470 Ω pull-down 9 %
+ * low.) A CMOS or MOS input draws next to nothing, and has no such stage.
  *
- * The 200 µA is at the family's default IIL; a user's own IIL (Settings ▸
- * Spice Lite) scales it, the knee and the switching point staying where they
- * are (`inputStages`).
+ * The table is at the family's default IIL; a user's own IIL (Settings ▸
+ * Spice Lite) scales its currents, its volts staying where they are
+ * (`inputStages`).
  */
-export const TTL_INPUT = Object.freeze({ volts: 1.3, kneeV: 0.9, typicalUa: 200 }); // prettier-ignore
+export const TTL_INPUT = Object.freeze({
+  volts: 1.1,
+  vccUaPerV: 49.6,
+  ua: Object.freeze([[0, 0], [0.02, 109.4], [0.22, 128.6], [0.82, 202.6], [0.955, 217.2], [1.04, 223.6], [1.3, 236.8]]), // prettier-ignore
+});
 
 /**
  * A CMOS input's leakage: below its switching point (half its supply) it
@@ -221,15 +225,20 @@ export function inputStages(def, vcc, config = null) {
   if (family === "74LS") {
     const p = familyParams(config, family);
     const base = FAMILY_DEFAULTS["74LS"];
-    // The flat part as a stage's LIMIT, the fall to the switching point as
-    // its resistance.
-    const limit = (TTL_INPUT.typicalUa * (p.inputLowUa / base.inputLowUa)) / 1e6; // prettier-ignore
+    // The table at this supply, its currents scaled by the IIL in force;
+    // `ohms` only the representative slope a stage carries, its last corner
+    // its limit.
+    const scale = p.inputLowUa / base.inputLowUa;
+    const shift = TTL_INPUT.vccUaPerV * (vcc - 5);
+    const corners = TTL_INPUT.ua.map(([d, ua]) => [d, (d > 0 ? Math.max(0, ua + shift) : 0) * scale / 1e6]); // prettier-ignore
+    const limit = corners[corners.length - 1][1];
     return [
       {
         volts: TTL_INPUT.volts,
-        ohms: (TTL_INPUT.volts - TTL_INPUT.kneeV) / limit,
+        ohms: limit > 0 ? TTL_INPUT.volts / limit : Number.POSITIVE_INFINITY,
         limit,
         sources: true,
+        corners,
       },
     ];
   }

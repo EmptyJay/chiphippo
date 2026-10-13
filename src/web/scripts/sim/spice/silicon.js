@@ -81,6 +81,9 @@
 //              instant Cx empties (spice/voltages.js `sustainedFlow`).
 //   readout    `[{pin, section}]`: the outputs whose rate or pulse its
 //              readout states, measured (spice/measure.js).
+//   sections   a dual monostable's pins per section (`{q, qn, plus, minus,
+//              reset, rxcx, cx}`): nothing the engine reads — the golden
+//              deck's (scripts/spice-deck.mjs).
 
 /** Each def's silicon twin, made once. */
 const TWINS = new WeakMap();

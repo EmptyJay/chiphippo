@@ -66,6 +66,7 @@ function stoppedDetail() {
     chipStatus: new Map(),
     warnings: [],
     netlist: null,
+    ownNetlist: false,
     clockLevels: new Map(),
     pausedClocks: new Set(),
     signalLevels: new Map(),
@@ -76,6 +77,7 @@ function stoppedDetail() {
     supplies: new Map(),
     bench: new Map(),
     lamps: null,
+    lampGlow: null,
     currents: new Map(),
     fastestHz: 0,
     replay: false,
@@ -523,7 +525,9 @@ export class SimHost {
             this.#mode = TRANSPORT.RUNNING;
             this.#onTransportChange?.(this.#mode);
           }
-          const shown = "netlist" in detail ? { ...detail, netlist: this.#netlistAt(message.nv) } : detail; // prettier-ignore
+          // A board ticked on a bounce's netlist brought it along; every
+          // other names the version it was built on.
+          const shown = "netlist" in detail && !detail.ownNetlist ? { ...detail, netlist: this.#netlistAt(message.nv) } : detail; // prettier-ignore
           window.dispatchEvent(new CustomEvent(type, { detail: shown }));
           if (!this.#inWorker) return; // a listener stopped the run
         }

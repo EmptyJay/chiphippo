@@ -133,10 +133,13 @@ Right-click a clock brick and choose **Properties…** to set its rate:
   a counter or a CPU actually get somewhere while you watch. Above about 20 Hz
   the lamp and any LEDs on the circuit blur together — that's the point at
   which the [logic analyzer](logic-analyzer.md) becomes the way to see what
-  happened. Once anything on the desk toggles faster than **25 Hz** (the
-  fastest clock or timer, times the speed), every lamp drops its glow halo and
-  shows just its colour: a glow that fast is only a flicker, and drawing it
-  costs more than anything else on the desk.
+  happened. An LED, or a display segment, that switches on and off faster than
+  the desk is redrawn is drawn at its **average** over each frame, as your eye
+  sees a real one: lit a fifth of the time, it glows a fifth as bright. Once
+  anything on the desk toggles faster than **25 Hz** (the fastest clock or
+  timer, times the speed), every lamp drops its glow halo and shows just its
+  colour: a glow that fast is only a flicker, and drawing it costs more than
+  anything else on the desk.
 
   While the simulation runs, a free-running clock also shows a small **⏸**
   button in its top-right corner. Click it to hold **that one clock**: it
@@ -162,7 +165,9 @@ a 10 Hz clock at 25 % comes up 75 ms into each period and goes down 25 ms
 later. The pulse width, like the rate, applies while running; moving it keeps
 the clock's place in the half it is in, so dragging the slider never holds an
 edge off. **Step** moves a PWM clock by the half it is in, and the glyph on
-the brick is drawn at its pulse width. The slider is greyed for any other
+the brick is drawn at its pulse width. An LED driven by a fast PWM clock looks
+as bright as its pulse width: at 250 Hz and 20 %, a fifth as bright as one lit
+steadily — dimming an LED, as on a bench. The slider is greyed for any other
 wave, and for a manual clock.
 
 With [Spice Lite](spice-lite.md#clock-waves) on, the Wave type also offers
@@ -170,7 +175,11 @@ With [Spice Lite](spice-lite.md#clock-waves) on, the Wave type also offers
 up)** — it climbs and drops straight back — **Sawtooth (ramp down)** — it
 drops and climbs straight back — or **Sine**. Each swings from 0 V to the
 clock's supply once per period of its rate, starting at its low point (a ramp
-down starts at the top), and the glyph on the brick shows which. The standard
+down starts at the top), and the glyph on the brick shows which. Set its
+**Amplitude** (peak to peak) and **Offset** (the voltage it is centred on) to
+swing it anywhere else — 1 V about 2.5 V, say; left blank they are the whole
+supply about half of it. A swing that would pass 0 V or the supply is clipped
+flat there, as a generator powered from those rails would be. The standard
 engine has no voltages, so with Spice Lite off such a clock is the square its
 levels are, and the brick draws one, whatever the card is set to. A manual
 clock is always square.
