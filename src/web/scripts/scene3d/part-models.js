@@ -57,6 +57,7 @@ import { chipBodyBox, chipBox } from "../components/chip-view.js";
 import {
   DIP_BODY_BOTTOM,
   DIP_BODY_TOP,
+  SPEAKER_BODY,
   TO220,
   TYPE_LABEL,
   inductorSize,
@@ -99,6 +100,7 @@ export function modelKind(def) {
   if (def.kind === "load") return "load";
   if (def.regulator) return "regulator";
   if (def.contacts) return "relay";
+  if (def.speaker) return "speaker";
   if (def.switchBank) return "dip-switch";
   if (def.rotatable) return "span";
   if (def.can) return "can";
@@ -807,6 +809,35 @@ function buildRelay(sb, doc, comp, def, params) {
   }).disc(centre, UP, 0.2, lampColors.off, 12);
 }
 
+/** A speaker: the black can over its two legs, the same circle the desk
+    draws it with (discrete-view.js's buildSpeaker — 12 mm across, standing
+    back over the rows behind its legs), 9.5 mm tall as KiCad's
+    Buzzer_12x9.5RM7.6 is; its cone and dust cap on top, its impedance on
+    the rim. */
+function buildSpeaker(sb, doc, comp, def, params) {
+  const o = anchorOf(doc, comp);
+  if (!o) return false;
+  const p = sb.palette;
+  const Y0 = 0.3;
+  const Y1 = 3.75;
+  const { x, y, r } = SPEAKER_BODY;
+  for (const dx of footprintOffsets(def, params)) stub(sb, o.x + dx, o.z, Y0 + 0.05); // prettier-ignore
+  sb.mesh.cylinder(at(o, x, Y0, y), UP, r, Y1 - Y0, p.speaker, {
+    segments: 32,
+    capColor: p.speaker,
+  });
+  sb.mesh.disc(at(o, x, Y1 + INK, y), UP, r - 0.66, p.speakerCone, 32);
+  sb.mesh.disc(at(o, x, Y1 + 2 * INK, y), UP, 0.55, p.speaker, 20);
+  sb.label({
+    text: `${params.impedance}Ω`,
+    center: at(o, x, Y1 + 2 * INK, y + r - 0.33),
+    ...ON_TOP,
+    height: 0.4,
+    maxWidth: 1.6,
+    color: p.speakerText,
+  });
+}
+
 /** A transistor, in whichever package it is: a TO-92's D standing on its
     three legs, or a TO-220's moulding and metal tab. Either carries a lamp
     the simulation lights while it conducts. */
@@ -1265,6 +1296,7 @@ const BUILDERS = Object.freeze({
   load: buildLoad,
   regulator: buildRegulator,
   relay: buildRelay,
+  speaker: buildSpeaker,
 });
 
 /** Every model kind there is — a test holds BUILDERS and modelKind to it. */

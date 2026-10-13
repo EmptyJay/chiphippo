@@ -34,7 +34,11 @@ const { PalettePanel } = await import("../components/palette-panel.js");
 // The tray's default family mode is 74LS (Feature 400): the CD4000 parts are
 // hidden until Settings ▸ Data Sheets shows them, so "the whole catalog" a
 // default tray lists is every part but those.
-const SHOWN_DEFS = PALETTE_DEFS.filter((d) => d.family !== "CD4000");
+// …and Spice Lite is off, so the parts only it simulates (the speaker, the
+// electronic load) are hidden too.
+const SHOWN_DEFS = PALETTE_DEFS.filter(
+  (d) => d.family !== "CD4000" && d.spiceOnly !== true,
+);
 // …and the chips the CHIPS folder holds.
 const SHOWN_CHIPS = CHIP_DEFS.filter((d) => d.family !== "CD4000");
 // The chip groups' order: where each first appears in the WHOLE catalog, so a
@@ -1106,6 +1110,31 @@ test("a filter matching only a hidden family says where the part is", () => {
   assert.match(host.querySelector(".palette-empty").textContent, /\d+ CD4000/);
   typeFilter(panel.element, "zzz");
   assert.doesNotMatch(host.querySelector(".palette-empty").textContent, /CD4/);
+});
+
+test("a part only Spice Lite simulates is offered only while it is on", () => {
+  resetDom();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const panel = new PalettePanel(host, {});
+  const ids = () =>
+    [...host.querySelectorAll(".palette-item")].map((i) => i.dataset.ref);
+  const spiceOnly = PALETTE_DEFS.filter((d) => d.spiceOnly === true);
+  assert.deepEqual(spiceOnly.map((d) => d.id).sort(), ["load", "speaker"]);
+  for (const def of spiceOnly) assert.ok(!ids().includes(def.id), def.id);
+  // Looked for, it says where it is.
+  typeFilter(panel.element, "speaker");
+  assert.deepEqual(ids(), []);
+  assert.match(host.querySelector(".palette-empty").textContent, /Spice Lite/); // prettier-ignore
+  // On, it is there — the speaker on a shelf of its own.
+  panel.setSpiceLite({ enabled: true });
+  assert.deepEqual(ids(), ["speaker"]);
+  typeFilter(panel.element, "");
+  for (const def of spiceOnly) assert.ok(ids().includes(def.id), def.id);
+  assert.ok(refsUnder(host, "Audio").includes("speaker"));
+  // And off again, gone.
+  panel.setSpiceLite({ enabled: false });
+  for (const def of spiceOnly) assert.ok(!ids().includes(def.id), def.id);
 });
 
 test("a family the open project uses is shown whatever the mode, until reset", () => {

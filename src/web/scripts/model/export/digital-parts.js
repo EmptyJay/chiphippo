@@ -204,4 +204,6 @@ export const DIGITAL_UNSUPPORTED = Object.freeze({
   LM317: "regulator",
   relay: "relay",
   load: "benchInstrument",
+  // A tone is a voltage across a coil, timed; Digital has neither.
+  speaker: "speaker",
 });

@@ -76,6 +76,7 @@ function stoppedDetail() {
     nodeVolts: new Map(),
     supplies: new Map(),
     bench: new Map(),
+    tones: new Map(),
     lamps: null,
     lampGlow: null,
     currents: new Map(),

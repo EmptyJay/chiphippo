@@ -98,6 +98,7 @@ const COMPONENT_ORDER = [
   "Relays",
   "LEDs",
   "Displays",
+  "Audio",
   "Oscillators",
   "Regulators",
   "Power",
@@ -495,7 +496,8 @@ export class PalettePanel {
   /**
    * Settings ▸ Spice Lite (`spiceLite`): which engine the next Run uses. On,
    * the discretes are simulated for real, so their groups lose the red (i)
-   * that says they are not. Applied live. Takes the stored config, read as
+   * that says they are not, and the parts only it simulates (`spiceOnly`)
+   * join the tray. Applied live. Takes the stored config, read as
    * the desk controller reads it: on only when `enabled` is exactly true.
    * @param {{enabled?: boolean}} [config]
    */
@@ -554,6 +556,14 @@ export class PalettePanel {
   #familyShown(def, shown = this.#shownFamilies()) {
     const family = familyOf(def);
     return family === null || shown.has(family);
+  }
+
+  /** Is `def` a part the next Run's engine can simulate? A `spiceOnly` part
+      (the speaker, the electronic load) does nothing the logic engine can
+      show, so the tray offers it only while Spice Lite is on. One already on
+      a desk stays there either way. */
+  #engineShown(def) {
+    return def.spiceOnly !== true || this.#spiceLite;
   }
 
   /**
@@ -675,7 +685,9 @@ export class PalettePanel {
 
     const shown = this.#shownFamilies();
     const matching = PALETTE_DEFS.filter((def) => this.#matches(def));
-    const defs = matching.filter((def) => this.#familyShown(def, shown));
+    const defs = matching.filter(
+      (def) => this.#familyShown(def, shown) && this.#engineShown(def),
+    );
     const customs = customChipDefs().filter((def) => this.#matches(def));
     if (defs.length === 0 && !(filtering && customs.length)) {
       this.#list.append(
@@ -1041,13 +1053,19 @@ export class PalettePanel {
   /**
    * The sentence the tray shows when the filter matched NOTHING it is showing
    * but did match parts of a hidden family — so "4011" in 74LS mode says where
-   * the CD4011B is rather than "No matches". Null when no hidden part matched.
+   * the CD4011B is rather than "No matches" — or matched a part only Spice
+   * Lite simulates, with it off. Null when no hidden part matched.
    * The switch lives in Settings, not the tray, which is why this has to.
    * @param {object[]} matching - every def the filter matched, shown or not.
    * @returns {string|null}
    */
   #hiddenFamilyHint(matching) {
     if (!this.#filter.trim()) return null;
+    // A part only Spice Lite simulates, looked for with it off.
+    const spiceOnly = matching.find((def) => !this.#engineShown(def));
+    if (spiceOnly && this.#familyShown(spiceOnly)) {
+      return t("palette.spiceOnlyHint", { part: partTitle(spiceOnly) });
+    }
     const hidden = matching.filter((def) => familyOf(def));
     if (hidden.length === 0) return null;
     const family = familyOf(hidden[0]);

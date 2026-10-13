@@ -2540,6 +2540,16 @@ export class SimController {
           // the load's readout and the regulator's hover. Empty on the
           // digital engine and when not running.
           bench: result?.bench ?? new Map(),
+          // Spice Lite: what each speaker is playing (compId → {hz, vpp,
+          // watts, volume}, spice/speakers.js) — while the run MOVES: paused,
+          // stepped by hand or held by the debugger, nothing sounds. What
+          // components/speaker-audio.js plays and the speaker's hover says.
+          tones:
+            this.#mode === TRANSPORT.RUNNING &&
+            !this.#debugStalled &&
+            !this.#debugDeciding
+              ? (result?.tones ?? new Map())
+              : new Map(),
           // Spice Lite: every LED junction's current and fate (key `c4`, or
           // `c5#a` for a segment → {amps, lit, level, overdriven, burnt}) —
           // what the desk lights them from. NULL on the digital engine, whose

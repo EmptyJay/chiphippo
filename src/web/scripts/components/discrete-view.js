@@ -120,6 +120,9 @@ const BOXES = Object.freeze({
   // A relay over five holes in a row, its cube standing ABOVE them as a
   // SIP's does, so the column holes below each leg stay clickable.
   relay: Object.freeze({ minX: -0.7, minY: -4.1, width: 5.4, height: 4.7 }),
+  // A 12 mm speaker on legs 0.3 in apart, its round body standing back over
+  // the rows behind them (see buildSpeaker).
+  speaker: Object.freeze({ minX: -0.9, minY: -4.2, width: 4.8, height: 4.9 }),
 });
 
 /**
@@ -1405,6 +1408,48 @@ function buildRelay(svg, def, params) {
   );
 }
 
+/** A speaker's round body: its centre (over the rows behind its legs, as a
+    relay's cube stands) and its radius — 12 mm across. */
+export const SPEAKER_BODY = Object.freeze({ x: 1.5, y: -1.75, r: 2.36 });
+
+/**
+ * A speaker over its two legs, seen from above: the black can, its cone and
+ * dust cap, its coil's impedance printed on the rim and a + by pin 1 — and,
+ * while it plays, a ring round the cone lit, its pitch on the cone below the
+ * cap (blank while silent) and a hover saying it. Only the can takes the
+ * pointer.
+ */
+function buildSpeaker(svg, params) {
+  const { x, y, r } = SPEAKER_BODY;
+  const text = (cls, tx, ty, value) => {
+    const node = svgEl("text", { class: cls, x: tx, y: ty, "text-anchor": "middle" }); // prettier-ignore
+    node.textContent = value;
+    return node;
+  };
+  svg.append(
+    svgEl("circle", { class: "part-speaker-body", cx: x, cy: y, r }),
+    svgEl("circle", { class: "part-speaker-ring", cx: x, cy: y, r: r - 0.42 }),
+    svgEl("circle", { class: "part-speaker-cone", cx: x, cy: y, r: r - 0.66 }),
+    svgEl("circle", { class: "part-speaker-cap", cx: x, cy: y, r: 0.55 }),
+    text("part-speaker-label", x, y + r - 0.06, `${params.impedance}Ω`),
+    text("part-speaker-label", 0.05, -0.15, "+"),
+    text("part-speaker-hz", x, y + 1.15, ""),
+  );
+  const hit = svgEl("g", { class: "part-speaker-hit" });
+  hit.append(
+    svgEl("title"),
+    svgEl("circle", { class: "part-display-hit", cx: x, cy: y, r }),
+  );
+  svg.append(hit);
+}
+
+/** The words a speaker's hover shows for what it is playing (`tone`, the
+    engine's `{hz}`), or "" while it is silent. */
+export function speakerHint(tone) {
+  if (!(tone?.hz > 0)) return "";
+  return t("desk.speaker.playing", { hz: hzLabel(tone.hz) });
+}
+
 /** The words a relay's hover shows for its live state. */
 export function relayHint(channel) {
   if (!channel) return "";
@@ -1996,6 +2041,8 @@ export function buildDiscreteSvg(ref, params = {}) {
   } else if (def.regulator) {
     buildRegulator(svg, def);
     if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
+  } else if (def.speaker) {
+    buildSpeaker(svg, normalized);
   } else if (def.contacts) {
     buildRelay(svg, def, normalized);
     if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
@@ -2254,6 +2301,19 @@ export class DiscreteView {
         ? relayHint(channel)
         : transistorHint(channel);
     }
+  }
+
+  /** What a speaker is playing (Spice Lite's `{hz, …}`), or null: its ring
+      lit, and its pitch on its cone and in its hover. */
+  setTone(tone) {
+    const playing = tone?.hz > 0;
+    this.#el.classList.toggle("part-discrete--playing", playing);
+    const readout = this.#el.querySelector(".part-speaker-hz");
+    const hz = playing ? hzLabel(tone.hz) : "";
+    if (readout && readout.textContent !== hz) readout.textContent = hz;
+    const title = this.#el.querySelector(".part-speaker-hit > title");
+    const text = speakerHint(tone);
+    if (title && title.textContent !== text) title.textContent = text;
   }
 
   /** One segment's element (the first drawn with its `data-seg`), looked up

@@ -723,6 +723,7 @@ and captioned with what to try — most of them best run with
 | `LM317` | **3.3 V** — set by 240 Ω and 390 Ω |
 | Relay | **Transistor driver** (with its flyback diode) · **No flyback diode** |
 | Electronic load | **Supply limit** — a 500 mA supply under 250 mA, raise it and watch it droop |
+| Speaker | **Tone** (a 555 at about 460 Hz) · **Pitch** (on a pot) · **Key** (a button on RESET) · **Siren** (one 555 moving the other's CONT) |
 
 The two **CPUs** can't be shown by flipping switches either, so each example
 is a whole computer, wired and ready: the CPU, an **AT28C256** ROM with the

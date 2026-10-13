@@ -114,13 +114,17 @@ belongs to neither family, so it shows in every mode; showing CD4000 alone,
 it shares the <strong>Timer</strong> group with the CD4000 timers.</li>
 <li><strong>COMPONENTS</strong> — <strong>Switches</strong>, <strong>Resistors</strong>, <strong>Capacitors</strong>,
 <strong>Inductors</strong>, <strong>Diodes</strong>, <strong>Transistors</strong>, <strong>Relays</strong>, <strong>LEDs</strong>,
-<strong>Displays</strong>, <strong>Oscillators</strong>, <strong>Regulators</strong> and <strong>Power</strong>, in that shelf
-order. Capacitors, Inductors,
+<strong>Displays</strong>, <strong>Audio</strong>, <strong>Oscillators</strong>, <strong>Regulators</strong> and <strong>Power</strong>, in
+that shelf order. Capacitors, Inductors,
 Diodes and Transistors carry a red <strong>(i)</strong> beside their names: in the
 digital engine these parts do only part of what the real ones do, and are
 there for the export and a complete design (see
 <a href="#inductors-diodes-and-transistors">Inductors, diodes and transistors</a>).
-With <strong>Spice Lite</strong> on they are simulated for real, and the <strong>(i)</strong> goes.</li>
+With <strong>Spice Lite</strong> on they are simulated for real, and the <strong>(i)</strong> goes.
+Two parts are there only while <strong>Spice Lite</strong> is on, because the standard
+engine can&#39;t simulate them at all: the <strong>speaker</strong> (<strong>Audio</strong>) and the
+<strong>electronic load</strong> (<strong>Power</strong>). One already on a desk stays there either
+way, and searching for one with Spice Lite off says where to turn it on.</li>
 <li><strong>Memory</strong> — the ROM/RAM chips, pulled out of CHIPS into a top-level group
 of their own.</li>
 <li><strong>ANNOTATIONS</strong> — labels and notes (see
@@ -569,6 +573,22 @@ badge shows the setting. It draws nothing on the standard engine (a logic
 simulator has no currents); under Spice Lite it shows the volts, amps and
 watts it is taking. It is left out of a KiCad export, since it is an
 instrument rather than part of the circuit.</p>
+<h2 id="the-speaker">The speaker</h2>
+<p>The <strong>speaker</strong> (<strong>COMPONENTS ▸ Audio</strong>, shown while
+<a href="spice-lite.html#speakers">Spice Lite</a> is on) is a small 12 mm PCB speaker on
+two legs 0.3 in apart, its round body standing over the rows behind them.
+Put a tone across it and you hear it: a 555 astable, a counter&#39;s output, a
+clock brick. Its coil is only 8 Ω, so feed it through a resistor and a
+capacitor (47 Ω and 100 µF from a 555&#39;s OUT), or from a transistor. Its
+<strong>Impedance</strong> is 8, 16 or 32 Ω, and its <strong>Volume</strong> (0–100 %) sets how loud
+it plays on top of the power the circuit puts into it. While it plays, the
+ring round its cone lights and the cone shows the pitch (the circuit&#39;s own,
+&quot;456 Hz&quot;), as does its hover.</p>
+<p>It plays the circuit&#39;s pitch at the run&#39;s speed: at ×¼ a 440 Hz tone sounds
+at 110 Hz, as everything else on the desk runs at a quarter of its speed.
+Pause, Step or Stop and it falls silent. Its <strong>pin-assignments window</strong> has
+an example with four desktops: a fixed <strong>Tone</strong>, <strong>Pitch</strong> on a pot, a
+<strong>Key</strong> that sounds only while a button is held, and a two-tone <strong>Siren</strong>.</p>
 <h2 id="character-lcd-modules">Character LCD modules</h2>
 <p>The <strong>Displays</strong> group holds two HD44780 character-LCD modules: a 16×2
 (the standard 1602A) and a 20×4 (the 2004A). They&#39;re drawn to their real

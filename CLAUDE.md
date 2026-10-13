@@ -64,6 +64,10 @@ electronic load brick, in both engines (see `.claude/rules/bench-parts.md`).
 with a 1–99 % pulse width, in both engines — and under Spice Lite put out a triangle, a
 trapezoid, a sawtooth either way or a sine (`sim/spice/waves.js`; see
 `.claude/rules/spice-lite.md` → "Clock waves").
+**The speaker** (2026-10-13, no feature number): a Spice-Lite-only part (COMPONENTS ▸ Audio)
+that plays the tone across it through Web Audio, with a 555 example of four desktops; parts
+flagged `spiceOnly` (it and the electronic load) leave the tray while Spice Lite is off (see
+`.claude/rules/spice-lite.md` → "The speaker").
 **CPU monitor** (2026-10-10, no feature number, `features/done/cpu-monitor.md`): a live
 window on a W65C02/Z80A, opened from the CPU's context menu. It shows memory around PC
 read through the circuit's own decode (bytes editable while running, a ROM's kept at Stop

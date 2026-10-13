@@ -418,7 +418,8 @@
       "custom": "カスタム",
       "opamps": "オペアンプ",
       "regulators": "レギュレータ",
-      "relays": "リレー"
+      "relays": "リレー",
+      "audio": "オーディオ"
     },
     "integration": {
       "output": "出力",
@@ -435,7 +436,8 @@
       "menuEdit": "設計を編集…",
       "menuDuplicate": "設計を複製",
       "menuDelete": "設計を削除"
-    }
+    },
+    "spiceOnlyHint": "{part} は Spice Lite でのみシミュレートされます。設定 ▸ Spice Lite で有効にしてください。"
   },
   "boards": {
     "full": "フルサイズ",
@@ -900,6 +902,9 @@
     },
     "load": {
       "title": "電子負荷"
+    },
+    "speaker": {
+      "title": "スピーカー"
     }
   },
   "colors": {
@@ -1252,6 +1257,9 @@
       "limited": "電流制限中",
       "dropout": "ドロップアウト：入力が低すぎて出力を保てない",
       "shutdown": "過熱停止：サーマルシャットダウンが作動し、冷えるまで停止中"
+    },
+    "speaker": {
+      "playing": "{hz} で鳴っています"
     }
   },
   "workspace": {
@@ -1346,7 +1354,8 @@
       "customChip": "省略されます。自分で設計したチップのため、Digital にはそのモデルがありません",
       "regulator": "省略されるため、その先の回路は電源につながらない状態で取り込まれる：Digital にはレギュレータがない",
       "relay": "省略される：接点はコイル電流で動くが、論理シミュレータには電流がない",
-      "benchInstrument": "省略される：回路の部品ではなく測定器"
+      "benchInstrument": "省略される：回路の部品ではなく測定器",
+      "speaker": "は省略されます: 音はコイルにかかる電圧を時間で測ったもので、Digital にはどちらもありません"
     }
   },
   "sim": {
@@ -1602,7 +1611,9 @@
       "wave": "波形",
       "duty": "パルス幅",
       "amplitude": "振幅",
-      "offset": "オフセット"
+      "offset": "オフセット",
+      "impedance": "インピーダンス",
+      "volume": "音量"
     },
     "option": {
       "manual": "手動",

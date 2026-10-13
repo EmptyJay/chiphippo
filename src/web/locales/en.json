@@ -419,7 +419,8 @@
       "custom": "CUSTOM",
       "opamps": "Op-amps",
       "regulators": "Regulators",
-      "relays": "Relays"
+      "relays": "Relays",
+      "audio": "Audio"
     },
     "integration": {
       "output": "Output",
@@ -436,7 +437,8 @@
       "menuEdit": "Edit Design…",
       "menuDuplicate": "Duplicate Design",
       "menuDelete": "Delete Design"
-    }
+    },
+    "spiceOnlyHint": "{part} is simulated by Spice Lite only. Turn it on in Settings ▸ Spice Lite."
   },
   "boards": {
     "full": "Full-size",
@@ -901,6 +903,9 @@
     },
     "load": {
       "title": "Electronic load"
+    },
+    "speaker": {
+      "title": "Speaker"
     }
   },
   "colors": {
@@ -1270,6 +1275,9 @@
       "limited": "at its current limit",
       "dropout": "in dropout: its input is too low to hold its output",
       "shutdown": "Shut down hot: its thermal shutdown has tripped, and it is off until it cools"
+    },
+    "speaker": {
+      "playing": "Playing {hz}"
     }
   },
   "workspace": {
@@ -1369,7 +1377,8 @@
       "customChip": "is left out: it is a chip you designed, and Digital has no model of it",
       "regulator": "is left out, so what it powers comes across unconnected to the supply: Digital has no regulator",
       "relay": "is left out: its contacts move with a coil's current, which a logic simulator does not have",
-      "benchInstrument": "is left out: a bench instrument, not a part of the circuit"
+      "benchInstrument": "is left out: a bench instrument, not a part of the circuit",
+      "speaker": "is left out: a tone is a voltage across its coil, timed, and Digital has neither"
     }
   },
   "sim": {
@@ -1629,7 +1638,9 @@
       "wave": "Wave type",
       "duty": "Pulse width",
       "amplitude": "Amplitude",
-      "offset": "Offset"
+      "offset": "Offset",
+      "impedance": "Impedance",
+      "volume": "Volume"
     },
     "option": {
       "manual": "Manual",

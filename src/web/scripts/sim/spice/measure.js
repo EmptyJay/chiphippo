@@ -41,7 +41,7 @@
 // The Properties card's Timing row is not this: it reads the catalog part,
 // stopped or running, as it always has.
 
-import { H } from "../levels.js";
+import { H, L } from "../levels.js";
 
 /** Numbers a section of the digital reading states, replaced by what was
     measured (or dropped, where nothing has been yet). */
@@ -118,4 +118,87 @@ export function measuredTiming(analysis, readout, markOf, now) {
   }
   const problems = (analysis?.problems ?? []).filter((p) => STRUCTURAL.has(p.code)); // prettier-ignore
   return { sections, problems };
+}
+
+/** A swing across a speaker smaller than this, volts peak to peak, is
+    silence (the solve's own settling, a node still charging). */
+export const TONE_MIN_VPP = 0.02;
+
+/** How far past the middle of its swing the voltage must go to count as the
+    other half of a cycle, as a share of the swing — the hysteresis that
+    keeps a node's slow sag inside one half from reading as a cycle. */
+const TONE_BAND = 0.2;
+
+/**
+ * Note the voltage across a speaker at `t` (seconds, shown), into `tones`
+ * (key → `{lo, hi, spanLo, spanHi, level, rise, prevRise, period, scale,
+ * lost}`, times in true seconds as noteLevel's). The voltage reads HIGH past
+ * the middle of the swing it makes (`lo`–`hi`: its last whole cycle's
+ * extremes, widened by anything past them since) by TONE_BAND of it, LOW as
+ * far below, and keeps its last reading between; a rise is timed as a
+ * readout's is. Until it has a period — and once it has made no cycle in
+ * STALE_PERIODS of it — the swing is what it has done since (`spanLo`–
+ * `spanHi`), so a quieter tone is heard again.
+ */
+export function noteTone(tones, key, volts, t, scale = 1) {
+  if (!Number.isFinite(volts)) return;
+  const was = tones.get(key);
+  const m = was
+    ? { ...was, spanLo: Math.min(was.spanLo, volts), spanHi: Math.max(was.spanHi, volts) } // prettier-ignore
+    : { lo: volts, hi: volts, spanLo: volts, spanHi: volts, level: null, lost: false }; // prettier-ignore
+  const timed = m.period > 0 && m.rise != null;
+  if (
+    timed &&
+    !m.lost &&
+    t - m.rise > STALE_PERIODS * m.period * (m.scale ?? 1)
+  ) {
+    // It stopped: measured afresh from here.
+    m.lost = true;
+    m.spanLo = volts;
+    m.spanHi = volts;
+  }
+  if (!timed || m.lost) {
+    m.lo = m.spanLo;
+    m.hi = m.spanHi;
+  } else {
+    m.lo = Math.min(m.lo, volts);
+    m.hi = Math.max(m.hi, volts);
+  }
+  const swing = m.hi - m.lo;
+  let level = m.level;
+  if (swing >= TONE_MIN_VPP) {
+    const mid = (m.lo + m.hi) / 2;
+    if (volts >= mid + TONE_BAND * swing) level = H;
+    else if (volts <= mid - TONE_BAND * swing) level = L;
+  }
+  if (level === H && m.level === L) {
+    m.prevRise = m.rise ?? null;
+    m.rise = t;
+    m.period = m.prevRise != null && !m.lost ? (t - m.prevRise) / scale : null; // prettier-ignore
+    m.scale = scale;
+    m.lost = false;
+    // The cycle just ended is the swing from here on.
+    if (m.period > 0) {
+      m.lo = m.spanLo;
+      m.hi = m.spanHi;
+    }
+    m.spanLo = volts;
+    m.spanHi = volts;
+  }
+  m.level = level;
+  tones.set(key, m);
+}
+
+/**
+ * What a speaker is playing at `now` (shown seconds), from its `noteTone`
+ * marks: `{hz, vpp}` — the pitch in true time and the swing that last whole
+ * cycle made, volts peak to peak — or null (silent: no cycle lately, or too
+ * small a swing to hear).
+ */
+export function toneOf(m, now) {
+  if (!m || !(m.period > 0) || m.rise == null) return null;
+  if (now - m.rise > STALE_PERIODS * m.period * (m.scale ?? 1)) return null;
+  const vpp = m.hi - m.lo;
+  if (!(vpp >= TONE_MIN_VPP)) return null;
+  return { hz: 1 / m.period, vpp };
 }

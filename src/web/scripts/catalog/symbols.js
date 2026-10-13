@@ -289,6 +289,14 @@ const SHAPE_DEFS = Object.freeze({
       { name: "gnd", side: "bottom", terminal: "gnd" },
     ],
   },
+  // A speaker: the magnet's box and its cone, + on top as an LED's anode is.
+  speaker: {
+    shape: "speaker",
+    terminals: [
+      { name: "+", side: "top", pin: 1 },
+      { name: "−", side: "bottom", pin: 2 },
+    ],
+  },
   // The electronic load: a current sink, + on top as the supply it draws from.
   load: {
     shape: "load",

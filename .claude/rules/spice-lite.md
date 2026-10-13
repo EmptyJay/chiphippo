@@ -3,6 +3,8 @@ paths:
   - "src/web/scripts/sim/spice/**"
   - "src/web/scripts/sim/engines.js"
   - "src/web/scripts/components/settings-spice-panel.js"
+  - "src/web/scripts/components/speaker-audio.js"
+  - "src/web/scripts/catalog/speaker.js"
   - "src/web/scripts/components/scope-view.js"
   - "src/web/scripts/model/scope-recorder.js"
   - "src/web/docs/spice-lite.md"
@@ -775,3 +777,31 @@ tiedLow)`: `supplyMaOf` hands a silicon block a `tiedLow(pin)` read off the wiri
   for `tran` only, so a 1 ms trigger pulse was never seen). The 4541's 2.23·RC against
   its sheet's 2.3 is unchanged: ngspice agrees with the network to 0.06 %, so the gap is
   the sheet's rounded formula (the 4060's sheet says 2.2 for the same network).
+- **The speaker** (2026-10-13, no plan; `catalog/speaker.js`, `spice/speakers.js`,
+  `spice/measure.js` `noteTone`/`toneOf`, `components/speaker-audio.js`). A discrete
+  (`def.speaker`, COMPONENTS ▸ Audio, footprint [0, 3], `impedance` 8/16/32 Ω +
+  `volume` %) that is a RESISTOR of its impedance to the solve (`weakBridges` third
+  element — the param is `impedance`, not `ohms`, because `properties.field.ohms` reads
+  "Resistance"). Inductance left out. `noteReadouts` (every settle and replayed
+  segment) samples `voltsAt(a) − voltsAt(b)` per speaker into `analog.tones` with the
+  readout's drawn-cycle `scale`; HIGH/LOW past the middle of the swing ± `TONE_BAND`
+  (20 %), the swing = last whole cycle's extremes (widened as it goes; re-measured from
+  scratch once `STALE_PERIODS` pass with no rise, so a quieter tone is heard again).
+  Sampling at settles catches every driver edge, even where an RC node's jump lands
+  after the settle (the alternation is what counts). `clearMarks` clears tones with the
+  island's marks. Result `tones`: id → `{hz, vpp, watts = (vpp/2)²/Z, volume}`; an
+  out-of-scope island's speaker carries `analog.sounding` from its last tick.
+  SimController publishes `tones` only while RUNNING (not stalled/deciding);
+  `app.js`'s `SpeakerAudio` plays a square OscillatorNode per speaker at hz × the
+  run's speed, gain `speakerLoudness` (√(W / 25 mW) × Volume) × `MASTER_GAIN` 0.2,
+  20 Hz–20 kHz only, a missing tone held `HOLD_MS` 150 then faded, the context
+  suspended when nothing plays. The cone shows the pitch (`.part-speaker-hz`, the
+  circuit's Hz, not × speed, blank while silent), the hover says "Playing N Hz", the
+  ring lights (`part-discrete--playing`). Matches the 555's own measured readout exactly at
+  456 Hz (stepped), 4.6 kHz and 20 kHz (drawn). Pre-existing, not the speaker's: a
+  555 at ~45 kHz into an RC-coupled load warns `oscillation` (never becomes a cycle).
+- **`spiceOnly` PARTS** (2026-10-13): a def flagged `spiceOnly: true` (the speaker,
+  the electronic load) is left out of the palette while Spice Lite is off
+  (`palette-panel.js` `#engineShown`, re-rendered by `setSpiceLite`); a filter that
+  matches one says to turn Spice Lite on (`palette.spiceOnlyHint`). One already on a
+  desk stays. Tests: `spice-speaker.test.js`, `speaker-audio.test.js`.

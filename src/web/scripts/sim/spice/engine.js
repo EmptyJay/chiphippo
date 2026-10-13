@@ -132,6 +132,8 @@
 //   currents   hole → amps through the lead in it, for every lead the solve
 //              knows (the probe's readout)
 //   lamps      every LED's and diode's verdict (below)
+//   tones      speaker id → {hz, vpp, watts, volume}: what each speaker
+//              plays (spice/speakers.js), the silent ones left out
 //   draws      what each supply delivers and where (spice/supply.js)
 //   supplies   PSU id → {set, volts, amps, demand, limit, limited, peak}
 //              (spice/supply.js)
@@ -244,7 +246,8 @@ import { partDef } from "../../catalog/index.js";
 import { LEVEL_WAVES } from "../../catalog/parts.js";
 import { isTimed, isVolatileMemory } from "../chip-eval.js";
 import { timingProbe } from "../rc-trace.js";
-import { measuredTiming, noteLevel } from "./measure.js";
+import { measuredTiming, noteLevel, noteTone } from "./measure.js";
+import { speakerTones, speakerTopology, toneKey } from "./speakers.js";
 import {
   MAX_TIMELINE,
   cycleStart,
@@ -861,6 +864,10 @@ export function tick({ spice = null, ...opts }) {
   const capFar = new Map(prior?.capFar ?? []);
   // Each timing part's readout outputs' edges, timed (spice/measure.js).
   const marks = new Map(prior?.marks ?? []);
+  // …and the voltage across each speaker, timed the same way into the tone
+  // it plays (spice/speakers.js).
+  const tones = new Map(prior?.tones ?? []);
+  const speakers = speakerTopology(opts.document, opts.netlist);
   // Each island's oscillation faster than the desk shows, drawn by its
   // schedule (spice/cycles.js) — for as long as the circuit it was recorded
   // on stands. One per ISLAND (spice/islands.js, features/04-island-analog-
@@ -2311,6 +2318,21 @@ export function tick({ spice = null, ...opts }) {
         noteLevel(marks, readerKey(c.comp.id, pin), out?.get(pin), at, scale); // prettier-ignore
       }
     }
+    if (!s) return;
+    for (const sp of speakers) {
+      const a = voltsAt(sp.a, at);
+      const b = voltsAt(sp.b, at);
+      if (a == null || b == null) continue;
+      const island = islandOf(sp.a) ?? islandOf(sp.b);
+      const scale = !drawn.size ? 1 : oneIsland() ? drawn.values().next().value.cycle.scale : (drawn.get(island)?.cycle.scale ?? 1); // prettier-ignore
+      noteTone(tones, toneKey(sp.id), a - b, at, scale);
+    }
+  };
+  /** Whether a speaker is on an island this tick is for (or on none). */
+  const speakerInScope = (sp) => {
+    if (!due) return true;
+    const i = islandOf(sp.a) ?? islandOf(sp.b);
+    return i == null || due.has(i);
   };
   /** One digital tick at `at` on the current view, its state kept. */
   // The bench sources' levels the last settle (or rest) ran on — what a
@@ -2540,10 +2562,18 @@ export function tick({ spice = null, ...opts }) {
       and those of a part on no analog island (every one, on a desk of one
       island). */
   const clearMarks = (key) => {
-    if (oneIsland()) return marks.clear();
+    if (oneIsland()) {
+      marks.clear();
+      tones.clear();
+      return;
+    }
     for (const k of [...marks.keys()]) {
       const i = isl.chipIsland.get(k.slice(0, k.lastIndexOf("#")));
       if (i == null || i === key || !isl.analogSet.has(i)) marks.delete(k);
+    }
+    for (const sp of speakers) {
+      const i = islandOf(sp.a) ?? islandOf(sp.b);
+      if (i == null || i === key || !isl.analogSet.has(i)) tones.delete(toneKey(sp.id)); // prettier-ignore
     }
   };
   /** Draw island `key`'s cycle from its timeline moment `j` to now by its
@@ -3203,6 +3233,7 @@ export function tick({ spice = null, ...opts }) {
     drawn.clear();
     cyclesMoved = true;
     marks.clear();
+    tones.clear();
   }
   if (moved) {
     // The supply moved: settle once more on what it now delivers, so a chip
@@ -3480,6 +3511,14 @@ export function tick({ spice = null, ...opts }) {
       warnings.push({ type: "timing", chip: c.comp.id, problems: measured.problems }); // prettier-ignore
     }
   }
+  // What each speaker plays — timed as a readout is, and on an island this
+  // tick was not for, what it played at that island's own last tick.
+  const sounding = speakerTones(speakers.filter(speakerInScope), tones, target); // prettier-ignore
+  for (const sp of speakers) {
+    if (speakerInScope(sp)) continue;
+    const was = prior?.sounding?.get(sp.id);
+    if (was) sounding.set(sp.id, was);
+  }
 
   // A gate its own feedback resistor biases into its linear region has no
   // logic answer: said as that (spice/linear-bias.js), in place of the
@@ -3527,6 +3566,8 @@ export function tick({ spice = null, ...opts }) {
       listen,
       capFar,
       marks,
+      tones,
+      sounding,
       outputs: committed,
       supplies: delivered,
       drops,
@@ -3580,6 +3621,7 @@ export function tick({ spice = null, ...opts }) {
     loads,
     lamps: lamps.lamps,
     currents: lamps.currents,
+    tones: sounding,
     draws: lastDraws,
     transistors: lamps.transistors,
     bench: bench.readings,

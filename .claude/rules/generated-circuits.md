@@ -145,6 +145,14 @@ Every benchable 74xx part's demonstration bench, shipped INSIDE the app as
   is load-bearing: a ringing coil alone is redrawn at 30 frames/s, so it is the
   clock's ticks that give the analyzer ~40 columns a cycle; the divider keeps the ring
   inside the analyzer's 0–5 V lane. Authored by a throwaway `builder()` script.
+- **The speaker's example** (2026-10-13): `speaker` → `demos/speaker.chiphippo` —
+  **Tone** (555, RA 1k / RB 15k / 100 nF ≈ 456 Hz, OUT → 47 Ω → 100 µF → 8 Ω),
+  **Pitch** (RB the pot's track, 50k, pin 3 tied to the wiper, RA 2.2k), **Key** (RESET
+  held LOW by **1 kΩ** — through 10 kΩ the pin's own current held it past 0.7 V and it
+  never reset — a push button pulls it HIGH) and **Siren** (a ~1 Hz 555's OUT through
+  6.8 kΩ onto the other's CONT: 440 ↔ 604 Hz). Spice Lite only — engine-parity exempts
+  them (`SPEAKER`), `spice-speaker.test.js` holds each to the 555's rate. Authored by a
+  throwaway builder script (not committed), like the passives'.
 - **A CPU's example is a whole computer whose program SHIPS IN ITS ROM**
   (`scripts/demo-computers.mjs` `COMPUTERS`, 2026-10-10): W65C02 / Z80A + AT28C256 +
   W65C22 VIA + 16×2 LCD on the VIA's ports + a reset button, typing `Hello World` a

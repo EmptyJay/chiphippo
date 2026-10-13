@@ -81,6 +81,7 @@ const SHAPE_SIZES = Object.freeze({
   psu: { w: 5, h: 5 },
   clock: { w: 5.5, h: 4.4 },
   load: { w: 5, h: 5 },
+  speaker: { w: 4.4, h: 5 },
 });
 
 /**
@@ -208,7 +209,7 @@ const BARY_PASSES = 4; // barycentric sweeps (fixed → deterministic)
 // on its nets. `sw-` is a PREFIX rule so the DIP banks (sw-dip1…8) and any
 // future switch classify without a hand-kept list.
 const SOURCE_REFS = new Set(["psu", "clock"]);
-const SINK_REFS = new Set(["led", "seg8cc", "seg8ca", "bar8", "bar8iso", "load"]); // prettier-ignore
+const SINK_REFS = new Set(["led", "seg8cc", "seg8ca", "bar8", "bar8iso", "load", "speaker"]); // prettier-ignore
 const isSource = (ref) => SOURCE_REFS.has(ref) || ref.startsWith("sw-");
 const isSink = (ref) => SINK_REFS.has(ref);
 

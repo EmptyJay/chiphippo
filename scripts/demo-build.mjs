@@ -124,6 +124,10 @@ export const HAND_BUILT = Object.freeze({
   // holds each to its closed form.
   "cap-electrolytic": "rc.chiphippo",
   inductor: "lc.chiphippo",
+  // The speaker (Spice Lite only): 555 tones — fixed, on a pot, keyed by a
+  // button and a two-tone siren — tests/spice-speaker.test.js holds each to
+  // the 555 driving it.
+  speaker: "speaker.chiphippo",
 });
 
 const DEMOS_ROOT = fileURLToPath(new URL("../demos/", import.meta.url));

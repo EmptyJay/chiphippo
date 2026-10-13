@@ -420,7 +420,8 @@
       "custom": "PERSONNALISÉES",
       "opamps": "Amplificateurs opérationnels",
       "regulators": "Régulateurs",
-      "relays": "Relais"
+      "relays": "Relais",
+      "audio": "Audio"
     },
     "integration": {
       "output": "Sortie",
@@ -437,7 +438,8 @@
       "menuEdit": "Modifier la conception…",
       "menuDuplicate": "Dupliquer la conception",
       "menuDelete": "Supprimer la conception"
-    }
+    },
+    "spiceOnlyHint": "{part} n’est simulé que par Spice Lite. Activez-le dans Réglages ▸ Spice Lite."
   },
   "boards": {
     "full": "Taille complète",
@@ -902,6 +904,9 @@
     },
     "load": {
       "title": "Charge électronique"
+    },
+    "speaker": {
+      "title": "Haut-parleur"
     }
   },
   "colors": {
@@ -1271,6 +1276,9 @@
       "limited": "à sa limite de courant",
       "dropout": "en décrochage : son entrée est trop basse pour tenir sa sortie",
       "shutdown": "Coupé à chaud : sa protection thermique s'est déclenchée, il reste éteint jusqu'à refroidir"
+    },
+    "speaker": {
+      "playing": "Joue {hz}"
     }
   },
   "workspace": {
@@ -1370,7 +1378,8 @@
       "customChip": "est omise : c'est une puce que vous avez conçue, et Digital n'en a pas de modèle",
       "regulator": "est omis, donc ce qu'il alimente arrive sans liaison à l'alimentation : Digital n'a pas de régulateur",
       "relay": "est omis : ses contacts suivent le courant d'une bobine, qu'un simulateur logique n'a pas",
-      "benchInstrument": "est omis : un instrument de paillasse, pas une pièce du circuit"
+      "benchInstrument": "est omis : un instrument de paillasse, pas une pièce du circuit",
+      "speaker": "est omis : un son est une tension aux bornes de sa bobine, mesurée dans le temps, et Digital n’a ni l’une ni l’autre"
     }
   },
   "sim": {
@@ -1632,7 +1641,9 @@
       "wave": "Forme d'onde",
       "duty": "Largeur d'impulsion",
       "amplitude": "Amplitude",
-      "offset": "Décalage"
+      "offset": "Décalage",
+      "impedance": "Impédance",
+      "volume": "Volume"
     },
     "option": {
       "manual": "Manuel",

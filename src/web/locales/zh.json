@@ -418,7 +418,8 @@
       "custom": "自定义",
       "opamps": "运算放大器",
       "regulators": "稳压器",
-      "relays": "继电器"
+      "relays": "继电器",
+      "audio": "音频"
     },
     "integration": {
       "output": "输出",
@@ -435,7 +436,8 @@
       "menuEdit": "编辑设计…",
       "menuDuplicate": "复制设计",
       "menuDelete": "删除设计"
-    }
+    },
+    "spiceOnlyHint": "{part} 仅由 Spice Lite 仿真。请在 设置 ▸ Spice Lite 中开启。"
   },
   "boards": {
     "full": "全尺寸",
@@ -900,6 +902,9 @@
     },
     "load": {
       "title": "电子负载"
+    },
+    "speaker": {
+      "title": "扬声器"
     }
   },
   "colors": {
@@ -1252,6 +1257,9 @@
       "limited": "处于限流状态",
       "dropout": "压差不足：输入过低，无法维持输出",
       "shutdown": "过热关断：热关断已触发，冷却前保持关闭"
+    },
+    "speaker": {
+      "playing": "正在播放 {hz}"
     }
   },
   "workspace": {
@@ -1346,7 +1354,8 @@
       "customChip": "被省略：它是你自己设计的芯片，Digital 中没有它的模型",
       "regulator": "被省略，因此它供电的部分在导入后与电源断开：Digital 没有稳压器",
       "relay": "被省略：其触点随线圈电流动作，而逻辑仿真器没有电流",
-      "benchInstrument": "被省略：它是台式仪器，不是电路的一部分"
+      "benchInstrument": "被省略：它是台式仪器，不是电路的一部分",
+      "speaker": "被省略：音调是线圈两端随时间测量的电压，而 Digital 两者都没有"
     }
   },
   "sim": {
@@ -1602,7 +1611,9 @@
       "wave": "波形",
       "duty": "脉冲宽度",
       "amplitude": "幅度",
-      "offset": "偏移"
+      "offset": "偏移",
+      "impedance": "阻抗",
+      "volume": "音量"
     },
     "option": {
       "manual": "手动",

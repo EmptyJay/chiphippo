@@ -420,7 +420,8 @@
       "custom": "PERSONALIZZATI",
       "opamps": "Amplificatori operazionali",
       "regulators": "Regolatori",
-      "relays": "Relè"
+      "relays": "Relè",
+      "audio": "Audio"
     },
     "integration": {
       "output": "Uscita",
@@ -437,7 +438,8 @@
       "menuEdit": "Modifica il progetto del chip…",
       "menuDuplicate": "Duplica il progetto del chip",
       "menuDelete": "Elimina il progetto del chip"
-    }
+    },
+    "spiceOnlyHint": "{part} è simulato solo da Spice Lite. Attivalo in Impostazioni ▸ Spice Lite."
   },
   "boards": {
     "full": "Dimensione intera",
@@ -902,6 +904,9 @@
     },
     "load": {
       "title": "Carico elettronico"
+    },
+    "speaker": {
+      "title": "Altoparlante"
     }
   },
   "colors": {
@@ -1271,6 +1276,9 @@
       "limited": "al suo limite di corrente",
       "dropout": "in dropout: l'ingresso è troppo basso per mantenere l'uscita",
       "shutdown": "Spento per surriscaldamento: è scattata la protezione termica e resta spento finché non si raffredda"
+    },
+    "speaker": {
+      "playing": "Suona a {hz}"
     }
   },
   "workspace": {
@@ -1370,7 +1378,8 @@
       "customChip": "viene escluso: è un chip progettato da te e Digital non ne ha un modello",
       "regulator": "viene omesso, quindi ciò che alimenta arriva scollegato dall'alimentazione: Digital non ha regolatori",
       "relay": "viene omesso: i suoi contatti seguono la corrente di una bobina, che un simulatore logico non ha",
-      "benchInstrument": "viene omesso: è uno strumento da banco, non un componente del circuito"
+      "benchInstrument": "viene omesso: è uno strumento da banco, non un componente del circuito",
+      "speaker": "viene omesso: un tono è una tensione sulla sua bobina, misurata nel tempo, e Digital non ha né l’una né l’altra"
     }
   },
   "sim": {
@@ -1632,7 +1641,9 @@
       "wave": "Forma d'onda",
       "duty": "Larghezza d'impulso",
       "amplitude": "Ampiezza",
-      "offset": "Offset"
+      "offset": "Offset",
+      "impedance": "Impedenza",
+      "volume": "Volume"
     },
     "option": {
       "manual": "Manuale",

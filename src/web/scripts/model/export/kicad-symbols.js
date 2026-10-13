@@ -514,6 +514,35 @@ function inductorSymbol(name) {
   );
 }
 
+/** A speaker — KiCad's Device:Speaker: the magnet's box, the cone flaring
+    out of it, both pins in from the left (1 the +, above). */
+function speakerSymbol(name) {
+  return twoPin(
+    name,
+    [
+      { number: "1", name: "1", type: "passive", x: -5.08, y: 1.27, side: "left" }, // prettier-ignore
+      { number: "2", name: "2", type: "passive", x: -5.08, y: -1.27, side: "left" }, // prettier-ignore
+    ],
+    [
+      [
+        "rectangle",
+        ["start", -2.54, 2.54],
+        ["end", 1.016, -2.54],
+        stroke(),
+        fill("none"),
+      ],
+      poly([
+        [1.016, 2.54],
+        [3.556, 5.08],
+        [3.556, -5.08],
+        [1.016, -2.54],
+      ]),
+    ],
+    5.08,
+    5.08,
+  );
+}
+
 /** A filled arrowhead with its tip at `tip`, pointing along `dir`. */
 function arrowhead(tip, dir, size = 0.9) {
   const len = Math.hypot(dir[0], dir[1]) || 1;
@@ -730,6 +759,7 @@ export function symbolFor(part, kp, widestValue = part.def.id) {
   if (kp.shape === "diode") return diodeSymbol(name, false);
   if (kp.shape === "zener") return diodeSymbol(name, true);
   if (kp.shape === "inductor") return inductorSymbol(name);
+  if (kp.shape === "speaker") return speakerSymbol(name);
   if (["npn", "pnp", "nmos", "pmos"].includes(kp.shape)) {
     return transistorSymbol(name, kp.shape);
   }

@@ -419,7 +419,8 @@
       "custom": "EIGENE CHIPS",
       "opamps": "Operationsverstärker",
       "regulators": "Spannungsregler",
-      "relays": "Relais"
+      "relays": "Relais",
+      "audio": "Audio"
     },
     "integration": {
       "output": "Ausgang",
@@ -436,7 +437,8 @@
       "menuEdit": "Entwurf bearbeiten…",
       "menuDuplicate": "Entwurf duplizieren",
       "menuDelete": "Entwurf löschen"
-    }
+    },
+    "spiceOnlyHint": "{part} wird nur von Spice Lite simuliert. Schalte es unter Einstellungen ▸ Spice Lite ein."
   },
   "boards": {
     "full": "Volle Größe",
@@ -901,6 +903,9 @@
     },
     "load": {
       "title": "Elektronische Last"
+    },
+    "speaker": {
+      "title": "Lautsprecher"
     }
   },
   "colors": {
@@ -1270,6 +1275,9 @@
       "limited": "an seiner Strombegrenzung",
       "dropout": "im Dropout: Der Eingang ist zu niedrig, um den Ausgang zu halten",
       "shutdown": "Heiß abgeschaltet: Die Übertemperaturabschaltung hat ausgelöst; er bleibt aus, bis er abkühlt"
+    },
+    "speaker": {
+      "playing": "Spielt {hz}"
     }
   },
   "workspace": {
@@ -1369,7 +1377,8 @@
       "customChip": "wird weggelassen: Es ist ein selbst entworfener Chip, und Digital hat kein Modell dafür",
       "regulator": "wird weggelassen, sodass das, was er versorgt, ohne Verbindung zur Versorgung übernommen wird: Digital hat keinen Spannungsregler",
       "relay": "wird weggelassen: Seine Kontakte folgen dem Strom einer Spule, den ein Logiksimulator nicht kennt",
-      "benchInstrument": "wird weggelassen: ein Messgerät, kein Teil der Schaltung"
+      "benchInstrument": "wird weggelassen: ein Messgerät, kein Teil der Schaltung",
+      "speaker": "wird weggelassen: Ein Ton ist eine zeitlich gemessene Spannung an seiner Spule, und Digital kennt beides nicht"
     }
   },
   "sim": {
@@ -1629,7 +1638,9 @@
       "wave": "Wellenform",
       "duty": "Pulsbreite",
       "amplitude": "Amplitude",
-      "offset": "Offset"
+      "offset": "Offset",
+      "impedance": "Impedanz",
+      "volume": "Lautstärke"
     },
     "option": {
       "manual": "Manuell",

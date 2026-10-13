@@ -266,8 +266,12 @@ export const LOAD_DEF = Object.freeze({
     "until the voltage is too low to (UNREG); constant resistance (CR) is " +
     "the resistor you set. It shows the volts, amps and watts while the " +
     "circuit runs (Spice Lite) and warns past 25 W. The logic engine has no " +
-    "currents: there it does nothing.",
+    "currents: there it does nothing, and the tray shows it only while Spice " +
+    "Lite is on.",
   group: "Power",
+  // Offered only while Spice Lite is on (components/palette-panel.js): the
+  // logic engine has no currents to draw.
+  spiceOnly: true,
   size: Object.freeze({ width: 8, height: 5 }),
   terminals: [
     { id: "pos", dx: 2, dy: 4 },

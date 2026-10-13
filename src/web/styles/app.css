@@ -1583,7 +1583,8 @@
 .part-discrete--sw-dip4,
 .part-discrete--sw-dip8,
 .part-discrete--lcd16x2,
-.part-discrete--lcd20x4 {
+.part-discrete--lcd20x4,
+.part-discrete--speaker {
   pointer-events: none;
 }
 
@@ -2013,6 +2014,56 @@
 .part-relay-pin {
   font-size: 0.26px; /* SVG user units = pitch units */
   opacity: 0.85;
+}
+
+/* A speaker (a 12 mm PCB one) over its two legs: the black can, its cone
+   and dust cap, and a ring round the cone lit while it plays (Spice Lite). */
+.part-speaker-body {
+  fill: var(--color-part-speaker);
+  stroke: var(--color-part-speaker-rim);
+  stroke-width: 0.08;
+}
+
+.part-speaker-ring {
+  fill: none;
+  stroke: var(--color-part-inset);
+  stroke-width: 0.12;
+}
+
+.part-discrete--playing .part-speaker-ring {
+  stroke: var(--color-part-on);
+  filter: drop-shadow(0 0 0.25px var(--color-part-on));
+}
+
+.part-speaker-cone {
+  fill: var(--color-part-speaker-cone);
+  stroke: var(--color-part-inset);
+  stroke-width: 0.05;
+}
+
+.part-speaker-cap {
+  fill: var(--color-part-speaker);
+  stroke: var(--color-part-speaker-rim);
+  stroke-width: 0.05;
+}
+
+.part-speaker-label {
+  fill: var(--color-part-speaker-text);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.36px; /* SVG user units = pitch units */
+  user-select: none;
+  pointer-events: none;
+}
+
+/* The pitch it plays, on the cone below the dust cap — empty while silent. */
+.part-speaker-hz {
+  fill: var(--color-part-on);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.42px; /* SVG user units = pitch units */
+  user-select: none;
+  pointer-events: none;
 }
 
 /* ── PSU brick (desk-level) ──────────────────────────────────────────────── */

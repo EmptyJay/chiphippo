@@ -573,6 +573,20 @@ Vishay and Sharp datasheets):
   its resistance (**CR**). It never sources. Its brick shows the volts, amps
   and watts while the circuit runs, and past **25 W** it warns.
 
+## Speakers
+
+A **speaker** is a resistor of its impedance in the solve (its coil's
+inductance, a few ohms at an audio tone, is left out). What makes it a
+speaker is that Spice Lite times the voltage across it, as it times a 555's
+output: each time the voltage swings past the middle of its swing it is a
+cycle, and the time between two of them is the pitch. The swing it makes,
+half of it squared over its impedance, is the power in its coil, and that
+power and its **Volume** set how loud it plays — a 25 mW tone at 100 % is
+as loud as it goes. The pitch is the circuit's own, even for a tone faster
+than the desk shows (a 555 at 5 kHz plays 5 kHz), times the run's speed.
+Below 20 Hz or above 20 kHz it is silent, and so is it on the standard
+engine, which has no voltages to time.
+
 ## LEDs
 
 With Spice Lite on, an LED carries the current its circuit really pushes

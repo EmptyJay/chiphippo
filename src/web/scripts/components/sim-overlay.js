@@ -129,6 +129,7 @@ export class SimOverlay {
     lamps,
     lampGlow,
     currents,
+    tones,
     fastestHz,
     replay,
   }) {
@@ -192,6 +193,12 @@ export class SimOverlay {
         this.#partViews
           .get(comp.id)
           ?.setRegulator?.(running ? (bench?.get(comp.id) ?? null) : null);
+      } else if (comp.board != null && partDef(comp.ref)?.speaker) {
+        // What each speaker is playing (Spice Lite; components/speaker-
+        // audio.js sounds it) — its ring and its hover.
+        this.#partViews
+          .get(comp.id)
+          ?.setTone?.(running ? (tones?.get(comp.id) ?? null) : null);
       }
     }
 

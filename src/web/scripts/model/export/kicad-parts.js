@@ -40,6 +40,7 @@
 import { packageSpec } from "../footprints.js";
 import { chipMarking } from "../../catalog/index.js";
 import { REGULATOR_DEFS, relayCoilVolts } from "../../catalog/bench-parts.js";
+import { speakerParams } from "../../catalog/speaker.js";
 import { formatComponentValueAscii } from "../component-value.js";
 import {
   inductorHoles,
@@ -330,6 +331,14 @@ export const KICAD_PARTS = Object.freeze({
     shape: "box",
     generic: true,
     value: (comp) => `Relay SPDT ${relayCoilVolts(comp?.params)}V`,
+  },
+  // A 12 mm speaker on legs 7.6 mm apart — the desk's 0.3 in is 7.62, so it
+  // is only the library's nearest — its square pad 1 the +, as ours is.
+  speaker: {
+    footprint: "Buzzer_Beeper:Buzzer_12x9.5RM7.6",
+    nearest: () => true,
+    shape: "speaker",
+    value: (comp) => `Speaker ${speakerParams(comp?.params).impedance}Ω`,
   },
 });
 

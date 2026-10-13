@@ -42,6 +42,7 @@ import { formatHenries } from "../model/henry-format.js";
 import { formatVolts } from "../model/volt-format.js";
 import { partNumberOf } from "../catalog/discretes.js";
 import { loadBadge } from "../catalog/bench-parts.js";
+import { speakerParams } from "../catalog/speaker.js";
 import { FLAG_LEN, flagPolygon } from "../model/signals.js";
 import { DeskView } from "./desk-view.js";
 import { beginPointerGesture, releaseWorld } from "./pointer-gesture.js";
@@ -297,6 +298,7 @@ function shapeText(shape, params) {
   }
   if (shape === "psu") return `${params?.volts ?? 5}V`;
   if (shape === "load") return loadBadge(params);
+  if (shape === "speaker") return `${speakerParams(params).impedance}Ω`;
   if (shape === "clock") {
     return params?.hz === "manual" ? "man" : `${params?.hz ?? 1}Hz`;
   }
@@ -593,6 +595,25 @@ function buildShapeBody(g, shape, geo, node) {
     }
     g.append(line(cx, cy, cx, h * 0.22));
     g.append(line(w * 0.32, h * 0.22, w * 0.68, h * 0.22));
+  } else if (shape === "speaker") {
+    // A speaker as the textbook draws it: the magnet's box, its leads into
+    // the top and bottom, the cone flaring out to the right — its impedance
+    // beside the box.
+    const bw = w * 0.2;
+    const top = h * 0.32;
+    const bottom = h * 0.68;
+    const flare = h * 0.16;
+    const right = cx + bw / 2;
+    g.append(
+      line(cx, 0, cx, top),
+      line(cx, bottom, cx, h),
+      svgEl("rect", { class: "schematic-shape-body", x: cx - bw / 2, y: top, width: bw, height: bottom - top }), // prettier-ignore
+      svgEl("path", {
+        class: "schematic-shape-line",
+        d: `M ${right} ${top} L ${w * 0.95} ${top - flare} L ${w * 0.95} ${bottom + flare} L ${right} ${bottom}`, // prettier-ignore
+      }),
+      svgText(shapeText(shape, node.params), cx - bw / 2 - 0.2, cy, "schematic-shape-value", 0.7, "end"), // prettier-ignore
+    );
   } else if (shape === "load") {
     // A current sink: a box with the arrow its current takes, + to −.
     g.append(

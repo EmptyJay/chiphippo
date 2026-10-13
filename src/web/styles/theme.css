@@ -155,6 +155,10 @@
   --color-part-transistor-text: #d8d8dc;
   --color-part-relay: #2c5fa8;
   --color-part-relay-text: #e8eef8;
+  --color-part-speaker: #1d1e21;
+  --color-part-speaker-cone: #3b3e44;
+  --color-part-speaker-rim: #8f959d;
+  --color-part-speaker-text: #c9ccd2;
   --color-part-on: #52d273;
   --color-part-held: #e0a840;
   /* Magic smoke from a burnt-out part. Sooty, but it has to read against BOTH

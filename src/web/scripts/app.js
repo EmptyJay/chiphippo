@@ -49,6 +49,7 @@ import { AiPanel } from "./components/ai-panel.js";
 import { checkConnection, effectiveProvider } from "./ai/connection.js";
 import { SPEEDS } from "./components/sim-controller.js";
 import { SimHost } from "./components/sim-host.js";
+import { SpeakerAudio } from "./components/speaker-audio.js";
 import { NetlistCache } from "./components/netlist-cache.js";
 import { MemoryBridge } from "./components/memory-bridge.js";
 import { ChipDebugger } from "./components/chip-debugger.js";
@@ -2196,6 +2197,11 @@ async function init() {
   toolbar.append(transportPill);
   window.addEventListener("chiphippo:sim-state", (e) =>
     showSpeed(speedBtn, sim?.speed ?? 1, e.detail.behind ?? null),
+  );
+  // The speakers, heard (Spice Lite): each plays its tone at the run's speed.
+  const speakerAudio = new SpeakerAudio();
+  window.addEventListener("chiphippo:sim-state", (e) =>
+    speakerAudio.update(e.detail, sim?.speed ?? 1),
   );
 
   // Buttons that edit topology are disabled while the circuit runs; the probe,

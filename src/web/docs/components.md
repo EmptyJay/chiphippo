@@ -27,13 +27,17 @@ The palette opens with every section collapsed, grouped by function:
   it shares the **Timer** group with the CD4000 timers.
 - **COMPONENTS** — **Switches**, **Resistors**, **Capacitors**,
   **Inductors**, **Diodes**, **Transistors**, **Relays**, **LEDs**,
-  **Displays**, **Oscillators**, **Regulators** and **Power**, in that shelf
-  order. Capacitors, Inductors,
+  **Displays**, **Audio**, **Oscillators**, **Regulators** and **Power**, in
+  that shelf order. Capacitors, Inductors,
   Diodes and Transistors carry a red **(i)** beside their names: in the
   digital engine these parts do only part of what the real ones do, and are
   there for the export and a complete design (see
   [Inductors, diodes and transistors](#inductors-diodes-and-transistors)).
   With **Spice Lite** on they are simulated for real, and the **(i)** goes.
+  Two parts are there only while **Spice Lite** is on, because the standard
+  engine can't simulate them at all: the **speaker** (**Audio**) and the
+  **electronic load** (**Power**). One already on a desk stays there either
+  way, and searching for one with Spice Lite off says where to turn it on.
 - **Memory** — the ROM/RAM chips, pulled out of CHIPS into a top-level group
   of their own.
 - **ANNOTATIONS** — labels and notes (see
@@ -394,6 +398,25 @@ badge shows the setting. It draws nothing on the standard engine (a logic
 simulator has no currents); under Spice Lite it shows the volts, amps and
 watts it is taking. It is left out of a KiCad export, since it is an
 instrument rather than part of the circuit.
+
+## The speaker
+
+The **speaker** (**COMPONENTS ▸ Audio**, shown while
+[Spice Lite](spice-lite.md#speakers) is on) is a small 12 mm PCB speaker on
+two legs 0.3 in apart, its round body standing over the rows behind them.
+Put a tone across it and you hear it: a 555 astable, a counter's output, a
+clock brick. Its coil is only 8 Ω, so feed it through a resistor and a
+capacitor (47 Ω and 100 µF from a 555's OUT), or from a transistor. Its
+**Impedance** is 8, 16 or 32 Ω, and its **Volume** (0–100 %) sets how loud
+it plays on top of the power the circuit puts into it. While it plays, the
+ring round its cone lights and the cone shows the pitch (the circuit's own,
+"456 Hz"), as does its hover.
+
+It plays the circuit's pitch at the run's speed: at ×¼ a 440 Hz tone sounds
+at 110 Hz, as everything else on the desk runs at a quarter of its speed.
+Pause, Step or Stop and it falls silent. Its **pin-assignments window** has
+an example with four desktops: a fixed **Tone**, **Pitch** on a pot, a
+**Key** that sounds only while a button is held, and a two-tone **Siren**.
 
 ## Character LCD modules
 

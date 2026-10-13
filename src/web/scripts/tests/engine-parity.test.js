@@ -109,6 +109,11 @@ const PASSIVE =
   "under Spice Lite one stores charge and the other carries current, so an " +
   "LED fades, a Schmitt input trips late and a coil rings " +
   "(tests/spice-rlc-examples.test.js holds each to its closed form)";
+const SPEAKER =
+  "a speaker is Spice Lite's alone: its tone is the voltage across it, " +
+  "timed — and the 555 that drives it its silicon, through a capacitor " +
+  "the logic engine runs as nothing (tests/spice-speaker.test.js holds " +
+  "each to the 555's own rate)";
 const EXEMPT = new Map([
   ["NE555 Astable example", SILICON],
   ["NE555 Monostable example", SILICON],
@@ -124,6 +129,10 @@ const EXEMPT = new Map([
   ["cap-electrolytic Fade example", PASSIVE],
   ["cap-electrolytic Timer example", PASSIVE],
   ["inductor Ringing example", PASSIVE],
+  ["speaker Tone example", SPEAKER],
+  ["speaker Pitch example", SPEAKER],
+  ["speaker Key example", SPEAKER],
+  ["speaker Siren example", SPEAKER],
 ]);
 
 const TICKS = 24;

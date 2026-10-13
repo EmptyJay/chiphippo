@@ -420,7 +420,8 @@
       "custom": "PERSONALIZADOS",
       "opamps": "Amplificadores operacionales",
       "regulators": "Reguladores",
-      "relays": "Relés"
+      "relays": "Relés",
+      "audio": "Audio"
     },
     "integration": {
       "output": "Salida",
@@ -437,7 +438,8 @@
       "menuEdit": "Editar el diseño…",
       "menuDuplicate": "Duplicar el diseño",
       "menuDelete": "Eliminar el diseño"
-    }
+    },
+    "spiceOnlyHint": "{part} solo lo simula Spice Lite. Actívalo en Ajustes ▸ Spice Lite."
   },
   "boards": {
     "full": "Tamaño completo",
@@ -902,6 +904,9 @@
     },
     "load": {
       "title": "Carga electrónica"
+    },
+    "speaker": {
+      "title": "Altavoz"
     }
   },
   "colors": {
@@ -1271,6 +1276,9 @@
       "limited": "en su límite de corriente",
       "dropout": "en caída: su entrada es demasiado baja para mantener la salida",
       "shutdown": "Apagado por calor: saltó su protección térmica y queda apagado hasta enfriarse"
+    },
+    "speaker": {
+      "playing": "Suena a {hz}"
     }
   },
   "workspace": {
@@ -1370,7 +1378,8 @@
       "customChip": "se omite: es un chip que has diseñado y Digital no tiene un modelo de él",
       "regulator": "se omite, así que lo que alimenta llega sin conexión a la fuente: Digital no tiene regulador",
       "relay": "se omite: sus contactos siguen la corriente de una bobina, que un simulador lógico no tiene",
-      "benchInstrument": "se omite: es un instrumento de banco, no una pieza del circuito"
+      "benchInstrument": "se omite: es un instrumento de banco, no una pieza del circuito",
+      "speaker": "se omite: un tono es una tensión en su bobina, medida en el tiempo, y Digital no tiene ninguna de las dos"
     }
   },
   "sim": {
@@ -1632,7 +1641,9 @@
       "wave": "Forma de onda",
       "duty": "Ancho de pulso",
       "amplitude": "Amplitud",
-      "offset": "Desplazamiento"
+      "offset": "Desplazamiento",
+      "impedance": "Impedancia",
+      "volume": "Volumen"
     },
     "option": {
       "manual": "Manual",
