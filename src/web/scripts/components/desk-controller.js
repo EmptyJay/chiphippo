@@ -44,7 +44,8 @@ import {
   spec,
 } from "../model/breadboard.js";
 import { holeAtWorld } from "../model/occupancy.js";
-import { partSeatAt } from "../model/seating.js";
+import { partSeatAt, seatGrabDy } from "../model/seating.js";
+import { seatsWide, withSeat } from "../model/footprints.js";
 import {
   addressWorld,
   boardsInRect,
@@ -93,6 +94,7 @@ import {
 import { BreadboardView } from "./breadboard-view.js";
 import { RouteDebugLayer } from "./route-debug-layer.js";
 import { ChipView, buildChipSvg } from "./chip-view.js";
+import { programmedPatch } from "../model/rom-binding.js";
 import { DiscreteView, buildDiscreteSvg } from "./discrete-view.js";
 import { partBodyBox } from "./part-body-box.js";
 import { PsuView } from "./psu-view.js";
@@ -314,6 +316,9 @@ export class DeskController {
   #onPartSelect;
   #chipDebug;
   #lastChipDebug = null; // re-applied to a part view mounted afterwards
+  // ROM chips whose inspector holds edits not yet saved — "edited, not saved"
+  // on the chip (#mountPart re-applies it to a view mounted afterwards).
+  #unsavedMemory = new Set();
 
   /**
    * @param {object} opts
@@ -1025,8 +1030,15 @@ export class DeskController {
   }
 
   /** Seat (board + anchor) for a part under the cursor — see model/seating.js. */
-  #partSeatAt(world, ref, grabOffsetCols, params = null) {
-    return partSeatAt(this.#doc.boards, ref, world, grabOffsetCols, params);
+  #partSeatAt(world, ref, grabOffsetCols, params = null, opts = {}) {
+    return partSeatAt(
+      this.#doc.boards,
+      ref,
+      world,
+      grabOffsetCols,
+      params,
+      opts,
+    );
   }
 
   // ── Rotation while placing / dragging ───────────────────────────────────
@@ -1059,10 +1071,7 @@ export class DeskController {
         m.active = true; // a flip alone still commits on release
         this.#partViews.get(m.id)?.setDragging(true);
       }
-      const comp = this.#doc.getComponent(m.id);
-      this.#partViews
-        .get(m.id)
-        ?.updateParams(this.#flippedParams(comp?.params, m.flip));
+      this.#partViews.get(m.id)?.updateParams(this.#dragParams(m));
       return true;
     }
     // ANY other gesture in flight — dragging a non-rotatable part, a board, a
@@ -1159,6 +1168,24 @@ export class DeskController {
   #flippedParams(params, toggle) {
     if (!toggle) return { ...params };
     return { ...params, rot: params?.rot === 180 ? 0 : 180 };
+  }
+
+  /** A part's params at `seat`: a DIP's with the e/i marker the seat says
+      (footprints.js `withSeat`), any other part's as they are. */
+  #seatedParams(ref, params, seat) {
+    const pkg = partDef(ref)?.package;
+    if (!pkg || !seat?.anchor || seat.wide === undefined) return params;
+    return withSeat(pkg, params, seat.anchor.charAt(0), seat.wide);
+  }
+
+  /** What a dragged part is DRAWN with: its params at the seat in hand, a
+      chip's mid-drag flip (R) included. */
+  #dragParams(d) {
+    return this.#seatedParams(
+      d.ref,
+      this.#flippedParams(d.params, d.flip === true),
+      d.seat,
+    );
   }
 
   /**
@@ -2272,32 +2299,32 @@ export class DeskController {
    * @param {string} id
    * @param {boolean} programmed
    * @param {{source?: string|null, edited?: boolean}} [binding]
+   * @param {{guid?: string|null}} [opts] - the file a write went to: flag
+   *   only the chip that names it (not one placed since under its id)
+   * @returns {boolean} whether there was such a ROM chip to flag
    */
-  setMemoryProgrammed(id, programmed, binding = {}) {
+  setMemoryProgrammed(id, programmed, binding = {}, { guid = null } = {}) {
     const comp = this.#doc.getComponent(id);
-    if (!comp || !isRomChip(partDef(comp.ref))) return;
-    const patch = { programmed: programmed === true };
-    const storage = comp.params?.storage;
-    if (storage) {
-      // setComponentParams merges SHALLOWLY, so storage goes over whole or the
-      // guid — the one thing that names the backing file — would be erased.
-      const next = { ...storage };
-      if (programmed !== true) {
-        delete next.source;
-        delete next.edited;
-      } else {
-        if (binding.source !== undefined) {
-          if (binding.source) next.source = binding.source;
-          else delete next.source;
-          delete next.edited;
-        }
-        if (binding.edited === true) next.edited = true;
-      }
-      patch.storage = next;
-    }
+    if (!comp || !isRomChip(partDef(comp.ref))) return false;
+    if (guid != null && comp.params?.storage?.guid !== guid) return false;
+    const patch = programmedPatch(comp.params, programmed, binding);
     const updated = this.#doc.setComponentParams(id, patch);
     this.#partViews.get(id)?.updateParams(updated.params);
     this.#emitDocChanged("program memory");
+    return true;
+  }
+
+  /**
+   * A memory chip's inspector has edits it has not saved (or no longer has:
+   * saved, reloaded, closed). Not a document change — the edits are only in
+   * that window — but the chip says so, since the circuit reads its file.
+   * @param {string} id
+   * @param {boolean} unsaved
+   */
+  setMemoryUnsaved(id, unsaved) {
+    if (unsaved) this.#unsavedMemory.add(id);
+    else this.#unsavedMemory.delete(id);
+    this.#partViews.get(id)?.setUnsaved?.(unsaved);
   }
 
   /** Drop + mount + select a desk-level brick (PSU/clock); emits doc-changed. */
@@ -2505,7 +2532,8 @@ export class DeskController {
     if (comp?.kind === "chip" && isMemory(def)) {
       // A volatile SRAM is never loaded from a file, so it never has one.
       if (isRomChip(def)) fields.push({ key: "imageSource", type: "readonly" });
-      fields.push({ key: "inspectMemory", type: "action" });
+      // (Inspecting is a menu item — it opens a window, as the designer's and
+      // the CPU monitor's do — #memoryMenuItems.)
       if (isRomChip(def) && !this.#editingLocked) {
         fields.push({ key: "programMemory", type: "action" });
       }
@@ -2576,6 +2604,8 @@ export class DeskController {
     ) {
       keys.push("unprogrammed");
     }
+    // Edits in its inspector that the chip's file has not got yet.
+    if (this.#unsavedMemory.has(id)) keys.push("unsaved");
     // The power sentences state the voltage the part saw and the supply it is
     // rated for (its family's, Feature 400); the others ignore both.
     const volts = this.#simOverlay.voltsOf(id) ?? "?";
@@ -2769,8 +2799,7 @@ export class DeskController {
       (#propertyFieldsFor); the dialog has already closed by the time this
       runs. */
   #onPropertyAction(id, key) {
-    if (key === "inspectMemory") this.#onOpenMemory?.(id);
-    else if (key === "programMemory") this.#onProgramMemory?.(id);
+    if (key === "programMemory") this.#onProgramMemory?.(id);
   }
 
   // ── Live lamp verdicts (read by the 3D view) ────────────────────────────
@@ -3012,6 +3041,7 @@ export class DeskController {
           paused: (debug.pausedChips ?? []).includes(component.id),
         });
       }
+      if (this.#unsavedMemory.has(component.id)) view.setUnsaved(true);
     }
     this.#partViews.set(component.id, view);
   }
@@ -3034,7 +3064,7 @@ export class DeskController {
         return;
       }
     }
-    view.updatePlacement(board, comp.anchor);
+    view.updatePlacement(board, comp.anchor, comp.params);
   }
 
   /** Row count for a part's pin/terminal-assignments window, or null if it
@@ -3528,8 +3558,19 @@ export class DeskController {
         startWorld: w,
         lastWorld: w,
         grabOffsetCols: seat.col - cursorCol,
-        origin: { board: comp.board, anchor: comp.anchor },
-        seat: { board: comp.board, anchor: comp.anchor },
+        // A 600-mil chip moves between its wide seats by the pointer's travel,
+        // from wherever on it the grab began (seating.js `seatGrabDy`).
+        grabDy: seatGrabDy(this.#doc.boards, comp, w),
+        origin: {
+          board: comp.board,
+          anchor: comp.anchor,
+          wide: seatsWide(comp.params),
+        },
+        seat: {
+          board: comp.board,
+          anchor: comp.anchor,
+          wide: seatsWide(comp.params),
+        },
         hasAnchored: this.#hasAnchored(id),
         riding,
         ridingParts,
@@ -3797,7 +3838,9 @@ export class DeskController {
       mid-drag. That is also exactly why the release has to call this again:
       see #onPartPointerUp. */
   #resolvePartSeat(d, world) {
-    const seat = this.#partSeatAt(world, d.ref, d.grabOffsetCols, d.params);
+    const seat = this.#partSeatAt(world, d.ref, d.grabOffsetCols, d.params, {
+      grabDy: d.grabDy ?? 0,
+    });
     const riding = Boolean(d.riding || d.ridingParts);
     if (seat) {
       d.seat = seat;
@@ -3811,7 +3854,7 @@ export class DeskController {
         riding ||
         this.#doc.canPlacePart(d.ref, seat.board, seat.anchor, {
           ignoreId: d.id,
-          params: d.params,
+          params: this.#seatedParams(d.ref, d.params, seat),
         });
     } else {
       d.legal = false; // off-board / off-row: stay at the last seat
@@ -3823,14 +3866,16 @@ export class DeskController {
     // Planned against `d.seat` even when the pointer fell off-board, so the
     // riders keep drawing where the part does.
     if (riding) {
+      const params = this.#seatedParams(d.ref, d.params, d.seat);
       d.plan = this.#doc.planPartMove(d.id, {
         board: d.seat.board,
         anchor: d.seat.anchor,
+        params,
         riding: d.riding,
         ridingParts: d.ridingParts,
       });
       const placements = [
-        { id: d.id, board: d.seat.board, anchor: d.seat.anchor },
+        { id: d.id, board: d.seat.board, anchor: d.seat.anchor, params },
         ...d.plan.parts,
       ];
       if (!(d.plan.resolved && d.checkBatch(placements, d.plan.moves))) {
@@ -3944,8 +3989,13 @@ export class DeskController {
 
     const seat = this.#resolvePartSeat(d, w);
     // Ride the lattice, snapped; tint tells occupancy legality.
-    if (seat)
-      view?.updatePlacement(this.#doc.getBoard(seat.board), seat.anchor);
+    if (seat) {
+      view?.updatePlacement(
+        this.#doc.getBoard(seat.board),
+        seat.anchor,
+        this.#dragParams(d),
+      );
+    }
     view?.setIllegal(!d.legal);
     // An Option-drag's wires follow live (a plain drag never touches the layer).
     if (d.riding) this.#wireLayer.setPartDrag(this.#ridingWirePreview(d));
@@ -4155,8 +4205,12 @@ export class DeskController {
     if (!cancelled) {
       this.#resolvePartSeat(d, releaseWorld(this.#deskView, e, d.lastWorld));
     }
+    // A 600-mil chip dragged from the narrow e/f seat to the wide e/i one
+    // keeps its anchor and still moves.
     const moved =
-      d.seat.board !== d.origin.board || d.seat.anchor !== d.origin.anchor;
+      d.seat.board !== d.origin.board ||
+      d.seat.anchor !== d.origin.anchor ||
+      (d.seat.wide ?? false) !== (d.origin.wide ?? false);
     // A chip flipped mid-drag commits its half-lap even if it lands back where
     // it started (the footprint maps onto itself, so it's always legal).
     const flipped = !cancelled && d.flip === true;
@@ -4171,11 +4225,18 @@ export class DeskController {
           d.seat.board,
           d.seat.anchor,
           d.plan,
+          { wide: d.seat.wide },
         );
       } else {
-        this.#doc.moveComponent(d.id, d.seat.board, d.seat.anchor);
+        this.#doc.moveComponent(d.id, d.seat.board, d.seat.anchor, {
+          wide: d.seat.wide,
+        });
       }
-      view?.updatePlacement(this.#doc.getBoard(d.seat.board), d.seat.anchor);
+      view?.updatePlacement(
+        this.#doc.getBoard(d.seat.board),
+        d.seat.anchor,
+        this.#doc.getComponent(d.id)?.params,
+      );
       this.#restoreLeadRiders(d); // now the document's own positions
       if (d.hasAnchored) {
         const shift = this.#anchorDelta(d.origin, d.seat);
@@ -4188,6 +4249,7 @@ export class DeskController {
       view?.updatePlacement(
         this.#doc.getBoard(d.origin.board),
         d.origin.anchor,
+        this.#doc.getComponent(d.id)?.params,
       );
       this.#restoreLeadRiders(d); // an illegal drop wrote nothing
     }
@@ -4197,9 +4259,11 @@ export class DeskController {
 
   /** Every part's context menu is the SAME three items, always, in this
       order — no more per-kind branching: a picker (PSU volts, clock/
-      oscillator rate, LCD colour, ROM programming, memory inspection…) is a
-      Properties-dialog field now, never a menu item of its own (see
-      #propertyFieldsFor). Properties… is always enabled — every part has at
+      oscillator rate, LCD colour, ROM programming…) is a Properties-dialog
+      field now, never a menu item of its own (see #propertyFieldsFor). The
+      exceptions are the parts with a WINDOW of their own — a custom chip's
+      designer, a CPU's monitor, a memory chip's inspector — which open from
+      a group of their own below Properties…. Properties… is always enabled — every part has at
       least Name/Description. Items that don't currently apply otherwise stay
       PRESENT but `disabled`, so the menu's shape never changes, only its
       enabled state. */
@@ -4224,6 +4288,9 @@ export class DeskController {
       },
       ...(def?.custom ? this.#customChipMenuItems(id) : []),
       ...(isCpu(def) ? this.#cpuMenuItems(id) : []),
+      ...(comp?.kind === "chip" && isMemory(def)
+        ? this.#memoryMenuItems(id)
+        : []),
       { separator: true },
       {
         label: t("desk.menu.deleteComponent"),
@@ -4273,6 +4340,21 @@ export class DeskController {
       {
         label: t("desk.menu.openCpuMonitor"),
         onSelect: () => this.#onOpenCpuMonitor?.(id),
+      },
+    ];
+  }
+
+  /**
+   * A memory chip's own group in its menu: the inspector — a window of its
+   * own, opened from the top level of the menu as the CPU monitor and the
+   * chip designer are.
+   */
+  #memoryMenuItems(id) {
+    return [
+      { separator: true },
+      {
+        label: t("desk.menu.inspectMemory"),
+        onSelect: () => this.#onOpenMemory?.(id),
       },
     ];
   }
@@ -5355,6 +5437,8 @@ export class DeskController {
     this.#restoring = true; // a load is not an edit — never record it
     try {
       this.#doc.load(raw);
+      // Another document's chips: its inspectors are closing with it.
+      this.#unsavedMemory.clear();
       this.#adoptUnbackedMemories();
       if (history) this.#history = history;
       if (this.#history.size === 0) this.#history.clear(this.#doc.snapshot());

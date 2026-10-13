@@ -118,6 +118,7 @@ const HINTED = new Set([
   "damaged",
   "overloaded",
   "unprogrammed",
+  "unsaved",
   "timing",
 ]);
 

@@ -84,12 +84,14 @@ function normalizeStorage(raw) {
     `programmed` flag (Feature 190) — chips otherwise carry no params. */
 /** Every chip's params: only non-default flags are stored, so a plain chip
     keeps `params: {}`. `rot: 180` is the flipped orientation — same holes,
-    reversed numbering. */
+    reversed numbering; `wide: true` the e/i seat. */
 function normalizeChipParams(raw) {
   const params = {};
   // 12 V's magic smoke and Spice Lite's brown smoke (catalog/run-latches.js).
   keepRunLatches(raw, params);
   if (raw?.rot === 180) params.rot = 180;
+  // A 600-mil chip in the wide e/i seat (model/footprints.js `withSeat`).
+  if (raw?.wide === true) params.wide = true;
   const storage = normalizeStorage(raw);
   if (storage) params.storage = storage;
   // A ROM flagged programmed by the in-app programmer — drives the

@@ -167,6 +167,13 @@ license-headers:
 # that; a genuine hang still fails, it just takes fifteen minutes to say so.
 TEST_TIMEOUT ?= 900000
 
+# Digital (hneemann/Digital, with its lib/ beside it) for the two Digital
+# export checks in export-digital-cli.test.js. It lives in the git-ignored
+# data/ folder, so on a machine without it (CI) this is empty and those two
+# tests SKIP; `make test` runs them when it is there (~6 min more, one java
+# per bench). `make test-fast` leaves them out. Override: DIGITAL_JAR=/path.
+DIGITAL_JAR ?= $(wildcard $(WORKSPACE)/data/digital/Digital.jar)
+
 # `make test` is the COMPLETE run — the one to trust before calling work done,
 # and the one CI runs. `make test-fast` is the quick confirmation while
 # iterating (~2.5 min against ~8): every test file still runs, but one whose
@@ -175,14 +182,14 @@ TEST_TIMEOUT ?= 900000
 # reports the rest as SKIPPED, each saying `make test` runs it.
 test: test-license-headers
 	@echo "Running JavaScript unit tests..."
-	@cd $(SRC_DIR) && node --test --test-timeout=$(TEST_TIMEOUT) \
+	@cd $(SRC_DIR) && DIGITAL_JAR="$(DIGITAL_JAR)" node --test --test-timeout=$(TEST_TIMEOUT) \
 		"app/tests/**/*.test.js" \
 		"web/scripts/tests/**/*.test.js"
 	@echo "--------------------------------"
 
 test-fast: test-license-headers
 	@echo "Running JavaScript unit tests (FAST: the slow corpus sampled — make test runs it whole)..."
-	@cd $(SRC_DIR) && CHIPHIPPO_TEST_FAST=1 node --test --test-timeout=$(TEST_TIMEOUT) \
+	@cd $(SRC_DIR) && CHIPHIPPO_TEST_FAST=1 DIGITAL_JAR= node --test --test-timeout=$(TEST_TIMEOUT) \
 		"app/tests/**/*.test.js" \
 		"web/scripts/tests/**/*.test.js"
 	@echo "--------------------------------"

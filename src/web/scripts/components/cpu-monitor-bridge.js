@@ -113,7 +113,7 @@ export class CpuMonitorBridge {
    * @param {object} [opts.timers] - `{now, set, clear}` (tests)
    * @param {boolean} [opts.keepEdits] - the checkbox's saved setting
    * @param {(on: boolean) => void} [opts.onKeepEdits] - persist it
-   * @param {(compId: string, bytes: Uint8Array, opts?: {stillHere: () => boolean}) => Promise<boolean>} [opts.saveRom]
+   * @param {(compId: string, bytes: Uint8Array) => Promise<boolean>} [opts.saveRom]
    *   - keep a ROM's final bytes (MemoryBridge `keepRunEdits`)
    * @param {import('./notification-stack.js').NotificationStack} [opts.notifications]
    * @param {{load: () => Record<string, number[]>,
@@ -149,6 +149,11 @@ export class CpuMonitorBridge {
       queueMicrotask(() => (this.#leaving = null));
       // A keep from an EARLIER Stop (a Stop, then a quick switch) still
       // writing into the desk being left: the swap waits for it too.
+      for (const kept of this.#keeping) e.detail?.hold?.(kept);
+    });
+    // …and so does the leave question (a Stop, then ⌘Q at once): until the
+    // keep has landed the project does not know it has bytes to save.
+    window.addEventListener("chiphippo:writes-pending", (e) => {
       for (const kept of this.#keeping) e.detail?.hold?.(kept);
     });
     window.addEventListener("chiphippo:cpumonitor-host-inbound", (e) =>
@@ -303,14 +308,11 @@ export class CpuMonitorBridge {
     // Named now, while the desk the run edited is the one on screen.
     const comp = this.#deskDoc?.getComponent?.(compId);
     const def = comp ? partDef(comp.ref) : null;
-    // The desk it was edited on: a write that comes back after that desk has
-    // gone (a swap that stopped waiting for it) flags nothing on the next.
-    const desk = this.#desk;
+    // (A write that lands after its desk has gone flags the chip in the
+    // desktop it belongs to — MemoryBridge `#landed`.)
     let kept = false;
     try {
-      kept = await this.#saveRom(compId, bytes, {
-        stillHere: () => this.#desk === desk,
-      });
+      kept = await this.#saveRom(compId, bytes);
     } catch (err) {
       console.error("[renderer] keeping CPU monitor edits failed:", err);
     }

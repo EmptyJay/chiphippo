@@ -143,7 +143,7 @@ test("a recovery that could not be read is set aside, never deleted", () => {
     const slot = store.defaultProjectPath;
     const bytes = fs.readFileSync(slot, "utf8");
     const aside = store.setAsideDefaultProject();
-    assert.ok(aside.startsWith(`${slot}.unread-`));
+    assert.match(path.basename(aside), /^default\.unread-\d+\.chiphippo$/, "still a project file, for File ▸ Open"); // prettier-ignore
     assert.equal(store.hasDefaultProject(), false, "the slot is free");
     assert.equal(fs.readFileSync(aside, "utf8"), bytes, "the work kept");
     assert.equal(store.setAsideDefaultProject(), null, "nothing left to move");

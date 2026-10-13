@@ -48,8 +48,9 @@ it to put it back. Chip Hippo remembers where you left it.
   (HIGH for 74LS, unknown for CD4000) and the supply the chip needs, exactly
   as for the library's parts of that family.
 - **Body width** — 300 mil or 600 mil, which is where it seats on the board:
-  a 300-mil chip straddles the trench in rows e and f, a 600-mil one in rows d
-  and h.
+  a 300-mil chip straddles the trench in rows e and f, a 600-mil one in two
+  rows six holes apart (d and h, or e/i, c/g or b/f — see
+  [Placing a DIP chip](components.md#placing-a-dip-chip)).
 - **Pins per side** — from 2 to 20, so from 4 to 40 pins.
 - **Units** — how many copies of the module the package holds, up to six
   (see [Units](#units)).

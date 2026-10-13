@@ -74,6 +74,17 @@ let checkInFlight = false;
 // attempt's own error listener, which runs after initUpdater's (that one
 // settles the check first). A check's failure is not the install's.
 let errorWasCheck = false;
+// The version downloaded last (`downloadedVersion`), and whether Squirrel
+// has failed it since — refused it, or a wait for it ran out: a Restart then
+// answers at once (`readyToInstall`, `installBlocked`) until a new download
+// gives Squirrel another one to take.
+let downloaded = null;
+let squirrelRefused = false;
+// The download a check started (`autoDownload`) while it is under way, and
+// whether that check was asked for: the check answers (`checkDone`) as soon
+// as it finds the update, so its download's failure is still the failure
+// the user who pressed Check is waiting to hear about.
+let downloading = null; // {manual} | null
 
 /** The check in flight answered: the next one starts from its own ask. */
 function checkDone() {
@@ -140,6 +151,7 @@ function initUpdater(resolveWindow) {
     pushUpdaterEvent("updater:checking", { manual: manualCheck }),
   );
   autoUpdater.on("update-available", (info) => {
+    downloading = { manual: manualCheck };
     pushUpdaterEvent("updater:available", {
       version: info?.version,
       manual: manualCheck,
@@ -153,14 +165,38 @@ function initUpdater(resolveWindow) {
   // download-progress is deliberately NOT forwarded: there is no live progress
   // bar to feed, so a per-chunk IPC hop plus a DOM dispatch would be work with
   // nothing to show for it. The milestones below are what the UI reacts to.
-  autoUpdater.on("update-downloaded", (info) =>
-    pushUpdaterEvent("updater:downloaded", { version: info?.version }),
-  );
+  autoUpdater.on("update-downloaded", (info) => {
+    downloaded = info?.version ?? null;
+    squirrelRefused = false;
+    downloading = null;
+    pushUpdaterEvent("updater:downloaded", { version: info?.version });
+  });
   autoUpdater.on("error", (err) => {
     errorWasCheck = checkInFlight;
+    // A check's own failure is not its download's (one can overlap the
+    // other): only a non-check error ends — and is — the download.
+    const download = errorWasCheck ? null : downloading;
+    if (!errorWasCheck) downloading = null;
+    // Squirrel refusing the download it was handed (macOS: a signature, a
+    // disk) — recorded whenever it happens, not only while a Restart waits:
+    // it starts taking the download the moment it lands, so most refusals
+    // come long before anyone presses Restart (`readyToInstall`).
+    if (
+      !errorWasCheck &&
+      !download &&
+      downloaded != null &&
+      autoUpdater.squirrelDownloadedUpdate === false
+    ) {
+      squirrelRefused = true;
+    }
+    // `manual` only for a CHECK's own failure — its search, or the download
+    // it started: the flag outlives the check that set it, so an install's
+    // error (Squirrel refusing the download, which electron-updater may
+    // report twice) would otherwise say "check failed" — and replace the
+    // install-failed toast and its Restart.
     pushUpdaterEvent("updater:error", {
       message: (err && err.message) || String(err),
-      manual: manualCheck,
+      manual: (manualCheck && errorWasCheck) || download?.manual === true,
     });
     checkDone();
   });
@@ -174,6 +210,13 @@ function initUpdater(resolveWindow) {
  * @param {{ manual?: boolean }} [opts]
  */
 function checkForUpdates({ manual = false } = {}) {
+  // A Restart waiting for Squirrel: a check now would have electron-updater
+  // re-serve the download it is still taking (closing the proxy Squirrel is
+  // reading from) — so none starts, and an asked-for one is told why.
+  if (readyWait) {
+    if (manual) pushUpdaterEvent("updater:preparing");
+    return;
+  }
   manualCheck = checkInFlight ? manualCheck || manual === true : manual === true; // prettier-ignore
   // A store build (Mac App Store / Microsoft Store) is updated BY the store,
   // and electron-builder strips the feed from the package, so there is nothing
@@ -250,8 +293,13 @@ let readyWait = null;
 /**
  * Resolve TRUE once an install would start at once — always, but on macOS
  * while Squirrel is still taking the download from electron-updater — or
- * FALSE if it does not get there in `waitMs` (or the app quits meanwhile:
- * `autoInstallOnAppQuit` has that one).
+ * FALSE if it does not get there in `waitMs` or the updater reports an error
+ * meanwhile (not a check's) — and at once once Squirrel has failed this
+ * download (`squirrelRefused`): main then says so and points at Check for
+ * Updates, which downloads it again and hands Squirrel a fresh one. No
+ * retry of our own: a check started under the wait announces its own
+ * progress ("available", "ready") over the "preparing" it is waiting on,
+ * and a check that finds nothing leaves the wait to run out (2026-10-12).
  *
  * Restart waits HERE, before main asks about unsaved work: asked first, the
  * "go" stood while Squirrel took its time — autosave stopped, the recovery
@@ -267,7 +315,6 @@ function readyToInstall({
   platform = process.platform,
   onWait,
 } = {}) {
-  // prettier-ignore
   let autoUpdater = null;
   try {
     autoUpdater = getAutoUpdater();
@@ -279,23 +326,51 @@ function readyToInstall({
   }
   const native = nativeUpdater();
   if (!native) return Promise.resolve(true);
+  if (squirrelRefused) return Promise.resolve(false);
   onWait?.();
+  // A second Restart joins the wait.
   readyWait ??= new Promise((resolve) => {
     let timer = null;
     const done = (ok) => {
       clearTimeout(timer);
       native.removeListener?.("update-downloaded", ready);
-      app.removeListener?.("before-quit", quit);
+      autoUpdater.removeListener?.("error", failed);
       readyWait = null;
       resolve(ok);
     };
     const ready = () => done(true);
-    const quit = () => done(false);
+    // Squirrel refusing the download (a signature, a disk) comes back through
+    // electron-updater's "error": no update is coming, so say so now rather
+    // than at the deadline. A check's own failure is not this wait's.
+    const failed = () => {
+      if (errorWasCheck) return;
+      squirrelRefused = true;
+      done(false);
+    };
     native.once?.("update-downloaded", ready);
-    app.once?.("before-quit", quit);
-    timer = setTimeout(quit, waitMs);
+    autoUpdater.on?.("error", failed);
+    // No before-quit ending: a quit the user then cancels (the unsaved-work
+    // question) leaves the app open and this Restart still wanted; a quit
+    // that goes through ends the process, and the wait with it. Running out
+    // counts as Squirrel failing it: waiting again would run out again. (If
+    // it finishes after all, `squirrelDownloadedUpdate` says so first.)
+    timer = setTimeout(() => {
+      squirrelRefused = true;
+      done(false);
+    }, waitMs);
   });
   return readyWait;
+}
+
+/** The version downloaded last, or null. */
+function downloadedVersion() {
+  return downloaded;
+}
+
+/** Whether Squirrel has failed the download (refused it, or its wait ran
+    out): a Restart cannot install it until a new download. */
+function installBlocked() {
+  return squirrelRefused;
 }
 
 function quitAndInstall(
@@ -377,5 +452,7 @@ module.exports = {
   initUpdater,
   checkForUpdates,
   readyToInstall,
+  downloadedVersion,
+  installBlocked,
   quitAndInstall,
 };

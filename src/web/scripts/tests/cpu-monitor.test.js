@@ -542,6 +542,33 @@ test("Step Over's return: at the return address, the stack where the call left i
   assert.equal(at(0xf0, 0x8004), false, "not at the return address");
 });
 
+test("Step Over's record of what ran last is set aside across an interrupt, and put back when it returns", async () => {
+  const { carryAcrossInterrupt } = await import("../components/sim-controller.js"); // prettier-ignore
+  const over = { prev: 0x30 }; // the routine's JMP, inside the window
+  carryAcrossInterrupt(over, "irq", 0xf0); // taken before the helper begins
+  over.prev = 0xd000; // the handler's own instructions…
+  carryAcrossInterrupt(over, "instr", 0xed); // …deeper: not back yet
+  carryAcrossInterrupt(over, "nmi", 0xed); // a nested one
+  over.prev = 0xe000;
+  carryAcrossInterrupt(over, "instr", 0xed); // the NMI's return
+  assert.equal(over.prev, 0xd000, "the IRQ handler's, as the NMI found it");
+  carryAcrossInterrupt(over, "instr", 0xf0); // the IRQ's return
+  assert.equal(over.prev, 0x30, "the routine's JMP again — #cameBack sees it");
+  assert.deepEqual(over.held, []);
+  // Back to back: the line still asserted, the next IRQ is taken as the
+  // first returns — at the same stack, before any instruction of the call.
+  carryAcrossInterrupt(over, "irq", 0xf0);
+  over.prev = 0xd040; // the handler, ending in its RTI…
+  carryAcrossInterrupt(over, "irq", 0xf0); // …and straight in again
+  over.prev = 0xd040;
+  carryAcrossInterrupt(over, "instr", 0xf0); // the second one's return
+  assert.equal(over.prev, 0x30, "still the routine's JMP, not the handler's RTI"); // prettier-ignore
+  assert.deepEqual(over.held, []);
+  carryAcrossInterrupt(over, "irq", 0xf0);
+  carryAcrossInterrupt(over, "reset", 0xfd);
+  assert.equal(over.held, null, "a reset forgets them");
+});
+
 test("SimController: a Step on a halted CPU is one bus cycle, not the Step's whole budget", async () => {
   const { sim, states } = await z80Controller({ hz: 1 });
   sim.pause();
@@ -653,6 +680,13 @@ test("the descriptors: calls, and register edits only at an instruction's start"
   assert.equal(m6502.isCall({ bytes: [0x4c, 0, 0x30] }), false, "JMP");
   for (const op of [0xcd, 0xc4, 0xfc, 0xc7, 0xff]) assert.equal(z80.isCall({ bytes: [op] }), true, op.toString(16)); // prettier-ignore
   for (const op of [0xc3, 0xc9, 0x18, 0x10]) assert.equal(z80.isCall({ bytes: [op] }), false, op.toString(16)); // prettier-ignore
+  // Jumps that NAME their target — not a computed one, nor a return.
+  for (const op of [0x4c, 0x80, 0x10, 0xd0, 0xf0, 0x0f, 0xff]) assert.equal(m6502.isJump({ bytes: [op] }), true, op.toString(16)); // prettier-ignore
+  for (const op of [0x6c, 0x7c, 0x60, 0x40, 0x20, 0xea]) assert.equal(m6502.isJump({ bytes: [op] }), false, op.toString(16)); // prettier-ignore
+  for (const op of [0xc3, 0xc2, 0xfa, 0x18, 0x20, 0x38, 0x10]) assert.equal(z80.isJump({ bytes: [op] }), true, op.toString(16)); // prettier-ignore
+  for (const op of [0xe9, 0xc9, 0xc0, 0xcd, 0xff, 0x00]) assert.equal(z80.isJump({ bytes: [op] }), false, op.toString(16)); // prettier-ignore
+  assert.equal(z80.isJump({ bytes: [0xdd, 0xe9] }), false, "JP (IX)");
+  assert.equal(m6502.isJump({ bytes: [null] }), false, "unreadable");
 
   const start = { ...initialCpu(), cur: "instr", pc: 0x0200, addr: 0x0200, sync: true, log: [] }; // prettier-ignore
   assert.equal(m6502.setRegister(start, "A", 0x7f).a, 0x7f);
@@ -847,6 +881,61 @@ test("SimController: Step Over judges where code RAN, not what the bytes before 
     assert.equal(reg(s, "SP"), 0xffff, what);
     sim.stop();
   }
+});
+
+test("SimController: Step Over is not fooled by a jump to a helper in the window, below the routine's entry", async () => {
+  // The routine sits right after its call site, inside the window: POP HL ·
+  // JP $0010. The helper at $0010 is past the return address with the stack
+  // at the call's level and nothing run below it — but it was JUMPED to,
+  // from further in; only the RET at its end comes back out, at $0008.
+  // $0010: INC HL · PUSH HL · RET.
+  const { sim, states } = await atCall({
+    program: [
+      [0x0004, [0xcd, 0x40, 0x00, 0xaa, 0x00]], // CALL $0040 · DB $AA · NOP
+      [0x0010, [0x23, 0xe5, 0xc9]],
+      [0x0040, [0xe1, 0xc3, 0x10, 0x00]],
+    ],
+  });
+  assert.equal(sim.stepOverCpu("c1"), "done");
+  const s = states.at(-1).cpuMonitor;
+  assert.equal(s.pc, 0x0008, "back past the argument, not at the helper");
+  assert.equal(reg(s, "SP"), 0xffff);
+  sim.stop();
+});
+
+test("SimController: Step Over sees an in-window routine come back past its argument by a computed jump", async () => {
+  // The routine right after its call site again, now coming back the
+  // idiomatic way: POP HL · INC HL · JP (HL). Its JP is further into the
+  // window than the landing, but it is not a jump that names its target.
+  const { sim, states } = await atCall({
+    program: [
+      [0x0004, [0xcd, 0x20, 0x00, 0xaa, 0x00]], // CALL $0020 · DB $AA · NOP
+      [0x0020, [0xe1, 0x23, 0xe9]],
+    ],
+  });
+  assert.equal(sim.stepOverCpu("c1"), "done");
+  const s = states.at(-1).cpuMonitor;
+  assert.equal(s.pc, 0x0008, "back past the argument");
+  assert.equal(sim.mode, "paused", "not handed to the run");
+  sim.stop();
+});
+
+test("SimController: Step Over sees a routine come back past its argument that also took a byte or two of its caller's", async () => {
+  // The routine (out of the window, at $0200) takes its return address AND
+  // two bytes of its caller's, then jumps past the argument: POP HL · POP DE
+  // · INC HL · JP (HL). The stack comes back two SHALLOWER than the call
+  // found it — as `returned` allows.
+  const { sim, states } = await atCall({
+    program: [
+      [0x0004, [0xcd, 0x00, 0x02, 0xaa, 0x00]], // CALL $0200 · DB $AA · NOP
+      [0x0200, [0xe1, 0xd1, 0x23, 0xe9]],
+    ],
+  });
+  assert.equal(sim.stepOverCpu("c1"), "done");
+  const s = states.at(-1).cpuMonitor;
+  assert.equal(s.pc, 0x0008, "back past the argument");
+  assert.equal(sim.mode, "paused", "not handed to the run");
+  sim.stop();
 });
 
 test("SimController: a breakpoint inside the call stops Step Over there", async () => {

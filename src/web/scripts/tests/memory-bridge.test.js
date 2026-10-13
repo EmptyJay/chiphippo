@@ -94,12 +94,21 @@ const memState = (detail) =>
     new window.CustomEvent("chiphippo:mem-state", { detail }),
   );
 
-function makeBridge({ running = false, image = null, comp } = {}) {
+function makeBridge({
+  running = false,
+  image = null,
+  comp,
+  whereNow,
+  markKept,
+  onImagesChanged,
+} = {}) {
+  // prettier-ignore
   const doc = { getComponent: (id) => (comp && comp.id === id ? comp : null) };
   const controller = {
     calls: [],
-    setMemoryProgrammed(id, v, binding) {
-      this.calls.push([id, v, binding]);
+    setMemoryProgrammed(id, v, binding, opts) {
+      this.calls.push(opts ? [id, v, binding, opts] : [id, v, binding]);
+      return true;
     },
   };
   const sim = { running, imageBytesOf: () => image };
@@ -113,8 +122,11 @@ function makeBridge({ running = false, image = null, comp } = {}) {
     controller,
     bridge: window.chiphippo,
     notifications,
+    whereNow,
+    markKept,
+    onImagesChanged,
   });
-  return { bridge, controller, notifications };
+  return { bridge, controller, notifications, sim };
 }
 
 const rom = (params = {}) => ({
@@ -231,7 +243,7 @@ test("the programmer picks an image, writes it, flags the chip, reloads", async 
   assert.deepEqual(calls.program, [[GUID, 8192]], "programmed the file");
   assert.deepEqual(
     controller.calls,
-    [["c1", true, { source: "/roms/prog.bin" }]],
+    [["c1", true, { source: "/roms/prog.bin" }, { guid: GUID }]],
     "flagged the chip programmed, and recorded which file it holds",
   );
   assert.ok(
@@ -277,7 +289,57 @@ test("a save writes the file and flags the chip programmed", async () => {
   assert.deepEqual(calls.write, [[GUID, [1, 2, 3]]]);
   // No `source`: a hand-edit does not change where the image came from, it
   // marks that the bytes have moved on from it.
-  assert.deepEqual(controller.calls, [["c1", true, { edited: true }]]);
+  assert.deepEqual(controller.calls, [
+    ["c1", true, { edited: true }, { guid: GUID }],
+  ]);
+});
+
+test("an inspector's Save is answered: its binding on success, its edits handed back on failure", async () => {
+  resetDom();
+  const { calls } = install({ files: new Map([[GUID, new Uint8Array(8192)]]) });
+  const comp = rom({ storage: { guid: GUID, source: "/roms/a.bin" } });
+  const { controller } = makeBridge({ comp });
+  // The fake controller flags nothing itself: the chip as flagged.
+  controller.setMemoryProgrammed = () => ((comp.params.storage.edited = true), true); // prettier-ignore
+  hostInbound("c1", { kind: "save", bytes: [1] });
+  await settle();
+  assert.deepEqual(calls.toInspector.at(-1), ["c1", { kind: "saved", source: "/roms/a.bin", edited: true }], "the line says (edited) — no reload over newer typing"); // prettier-ignore
+  window.chiphippo.mem.write = async () => ({ ok: false, error: "disk full" });
+  hostInbound("c1", { kind: "save", bytes: [2] });
+  await settle();
+  assert.deepEqual(calls.toInspector.at(-1), ["c1", { kind: "save-failed" }], "unsaved again: Save is offered again"); // prettier-ignore
+});
+
+test("an inspector's unsaved edits reach the desk, and leave it when the window closes", () => {
+  resetDom();
+  install({ files: new Map([[GUID, new Uint8Array(8192)]]) });
+  const { controller } = makeBridge({ comp: rom({ storage: { guid: GUID } }) });
+  const unsaved = [];
+  controller.setMemoryUnsaved = (id, on) => unsaved.push([id, on]);
+  hostInbound("c1", { kind: "edits", unsaved: true });
+  hostInbound("c1", { kind: "edits", unsaved: false });
+  hostInbound("c1", { kind: "edits", unsaved: true });
+  // main's word that the window has gone: its edits went with it
+  hostInbound("c1", { kind: "closed" });
+  assert.deepEqual(unsaved, [
+    ["c1", true],
+    ["c1", false],
+    ["c1", true],
+    ["c1", false],
+  ]);
+});
+
+test("Program asks again after the picker whether a run has started", async () => {
+  resetDom();
+  const { calls } = install({ files: new Map([[GUID, new Uint8Array(8192)]]) });
+  const { bridge, sim, notifications } = makeBridge({ comp: rom({ storage: { guid: GUID } }) }); // prettier-ignore
+  window.chiphippo.mem.pickImage = async () => {
+    sim.running = true; // ⌘R while the dialog was up
+    return { bytes: new Uint8Array(8192), path: "/roms/a.bin" };
+  };
+  await bridge.program("c1");
+  assert.deepEqual(calls.program, [], "not written under the run");
+  assert.equal(notifications.calls.at(-1).variant, "danger");
 });
 
 test("running mem-state streams per-chip byte changes to inspectors", () => {
@@ -445,7 +507,9 @@ test("keepRunEdits saves a ROM's run bytes as Save does, and reloads its inspect
   calls.toInspector.length = 0;
   assert.equal(await bridge.keepRunEdits("c1", new Uint8Array([9, 8, 7])), true); // prettier-ignore
   assert.deepEqual(calls.write, [[GUID, [9, 8, 7]]]);
-  assert.deepEqual(controller.calls, [["c1", true, { edited: true }]]);
+  assert.deepEqual(controller.calls, [
+    ["c1", true, { edited: true }, { guid: GUID }],
+  ]);
   await settle();
   assert.equal(
     calls.toInspector.at(-1)?.[1]?.kind,
@@ -454,16 +518,98 @@ test("keepRunEdits saves a ROM's run bytes as Save does, and reloads its inspect
   );
 });
 
-test("keepRunEdits flags nothing when its desk has gone by the time the write comes back", async () => {
+test("a ROM write flags its chip where it BEGAN — asked of the workspace, whatever the desk holds by then", async () => {
   resetDom();
   const { calls } = install({ files: new Map([[GUID, new Uint8Array(8192)]]) });
-  window.chiphippo.mem.load = () =>
-    Promise.resolve({ ok: true, bytes: [7, 7] }); // what the file held // prettier-ignore
-  const { bridge, controller } = makeBridge({ comp: rom({ storage: { guid: GUID } }) }); // prettier-ignore
-  const kept = await bridge.keepRunEdits("c1", new Uint8Array([1]), { stillHere: () => false }); // prettier-ignore
-  assert.equal(kept, false, "not said to be kept");
-  assert.deepEqual(controller.calls, [], "no chip on the desk there NOW is flagged"); // prettier-ignore
-  assert.deepEqual(calls.write, [[GUID, [1]], [GUID, [7, 7]]], "and the file put back as it was"); // prettier-ignore
+  let land;
+  const written = new Promise((r) => (land = r));
+  window.chiphippo.mem.write = (g, b) => (calls.write.push([g, [...b]]), written.then(() => ({ ok: true }))); // prettier-ignore
+  const elsewhere = [];
+  let changed = 0;
+  let stillOpen = true;
+  const { bridge, controller } = makeBridge({
+    comp: rom({ storage: { guid: GUID } }),
+    whereNow: () => ({ project: 1, tab: "t1" }),
+    markKept: (where, id, binding, guid) => (elsewhere.push([where, id, binding, guid]), stillOpen), // prettier-ignore
+    onImagesChanged: () => (changed += 1),
+  });
+  const keeping = bridge.keepRunEdits("c1", new Uint8Array([1]));
+  // A swap and the leave question can wait for it while it is under way.
+  const held = [];
+  window.dispatchEvent(new CustomEvent("chiphippo:writes-pending", { detail: { hold: (p) => held.push(p) } })); // prettier-ignore
+  assert.equal(held.length, 1, "in flight: held");
+  // The desk changes under it, then the write lands.
+  window.dispatchEvent(new CustomEvent("chiphippo:desk-loaded"));
+  land();
+  assert.equal(await keeping, true, "kept — in the desktop it was made on");
+  assert.deepEqual(controller.calls, [], "not the chip on the desk NOW: the workspace decides"); // prettier-ignore
+  assert.deepEqual(elsewhere, [[{ project: 1, tab: "t1" }, "c1", { edited: true }, GUID]], "with the file it went to"); // prettier-ignore
+  assert.deepEqual(calls.write, [[GUID, [1]]], "written once, nothing read back first"); // prettier-ignore
+  assert.equal(changed, 1, "its project has bytes to save");
+  // The next one has nothing to flag (that project has gone): no •.
+  stillOpen = false;
+  const later = bridge.keepRunEdits("c1", new Uint8Array([2]));
+  window.dispatchEvent(new CustomEvent("chiphippo:desk-loaded"));
+  land();
+  assert.equal(await later, false, "written, but no chip names it: not kept");
+  assert.equal(changed, 1, "nothing flagged, nothing marked edited");
+  assert.equal(
+    elsewhere.length,
+    2,
+    "offered to where it was made, all the same",
+  );
+  const after = [];
+  window.dispatchEvent(new CustomEvent("chiphippo:writes-pending", { detail: { hold: (p) => after.push(p) } })); // prettier-ignore
+  assert.equal(after.length, 0, "landed: nothing left to hold");
+});
+
+test("Program stamps where it began BEFORE the picker; a write that throws is a failed one", async () => {
+  resetDom();
+  install({ files: new Map([[GUID, new Uint8Array(8192)]]) });
+  let tab = "t1";
+  const marked = [];
+  window.chiphippo.mem.pickImage = async () => {
+    tab = "t2"; // a desktop switch while the dialog is up
+    return { bytes: new Uint8Array(8192), path: "/roms/a.bin" };
+  };
+  const { bridge, notifications } = makeBridge({
+    comp: rom({ storage: { guid: GUID } }),
+    whereNow: () => ({ project: 1, tab }),
+    markKept: (where, id, binding, guid) => (marked.push([where.tab, id, binding, guid]), true), // prettier-ignore
+  });
+  await bridge.program("c1");
+  assert.deepEqual(marked, [["t1", "c1", { source: "/roms/a.bin" }, GUID]], "the desktop the chip was picked on"); // prettier-ignore
+  // A write whose IPC throws: said, not an unhandled rejection.
+  window.chiphippo.mem.write = async () => {
+    throw new Error("disk gone");
+  };
+  assert.equal(await bridge.keepRunEdits("c1", new Uint8Array([1])), false);
+  assert.match(JSON.stringify(notifications.calls.at(-1)), /disk gone/);
+  assert.equal(marked.length, 1, "nothing flagged for it");
+});
+
+test("with no workspace to ask, a write landing after the desk changed flags nothing", async () => {
+  resetDom();
+  install({ files: new Map([[GUID, new Uint8Array(8192)]]) });
+  let land;
+  const written = new Promise((r) => (land = r));
+  window.chiphippo.mem.write = () => written.then(() => ({ ok: true }));
+  let changed = 0;
+  const { bridge, controller } = makeBridge({
+    comp: rom({ storage: { guid: GUID } }),
+    onImagesChanged: () => (changed += 1),
+  });
+  const keeping = bridge.keepRunEdits("c1", new Uint8Array([1]));
+  window.dispatchEvent(new CustomEvent("chiphippo:desk-loaded"));
+  land();
+  assert.equal(await keeping, false);
+  assert.deepEqual(controller.calls, [], "not whatever chip c1 is now");
+  assert.equal(changed, 0);
+  // Landing on the same desk: flagged there, with the file it went to.
+  window.chiphippo.mem.write = async () => ({ ok: true });
+  assert.equal(await bridge.keepRunEdits("c1", new Uint8Array([1])), true);
+  assert.deepEqual(controller.calls, [["c1", true, { edited: true }, { guid: GUID }]]); // prettier-ignore
+  assert.equal(changed, 1);
 });
 
 test("keepRunEdits refuses while running, and an SRAM has nothing to keep", async () => {

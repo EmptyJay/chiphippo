@@ -30,7 +30,10 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { PALETTE_DEFS, partDef } from "../catalog/index.js";
+import fs from "node:fs";
+import { PALETTE_DEFS, partDef, setCustomChips } from "../catalog/index.js";
+import { DeskDoc } from "../model/desk-doc.js";
+import { newCustomChip } from "../model/custom-chip.js";
 import { exportNetlist } from "../model/export/export-netlist.js";
 import {
   KICAD_LEFT_OUT,
@@ -43,6 +46,11 @@ import {
   KICAD_LIB,
   exportKicad,
 } from "../model/export/kicad.js";
+import {
+  CHAR_W,
+  GRID,
+  PIN_NAME_OFFSET,
+} from "../model/export/kicad-symbols.js";
 import { parseSexpr } from "../model/export/sexpr.js";
 import { bench, demoDocs } from "./export-fixtures.js";
 import { astable555, bench as timingBench } from "./timing-fixtures.js";
@@ -288,6 +296,34 @@ test("an LED's pads follow its polarity, cathode on KiCad's pad 1", () => {
   assert.equal(kicadPart(led).pad("2"), "1");
   led.comp.params = { ...led.comp.params, flip: true };
   assert.equal(kicadPart(led).pad("1"), "1", "flipped, pin 1 is the cathode");
+});
+
+test("a stand-in footprint's warning names the stand-in it is", () => {
+  // The latching push button gets the 6 mm tactile footprint, not a pin
+  // header: one shared "pin-header" warning told the user something false.
+  const en = JSON.parse(
+    fs.readFileSync(new URL("../../locales/en.json", import.meta.url), "utf8"),
+  );
+  const seen = new Set();
+  for (const [id, spec] of Object.entries(KICAD_PARTS)) {
+    if (!spec.generic) continue;
+    const def = partDef(id);
+    const k = kicadPart({ def, comp: { params: def.normalizeParams({}) } });
+    seen.add(k.generic);
+    assert.ok(en.export.reason[k.generic], `${id}'s ${k.generic} has words`);
+    if (k.generic === "genericFootprint") {
+      assert.match(k.footprint, /^Connector_PinHeader_/, `${id} is a header`);
+    }
+  }
+  const toggle = partDef("sw-toggle");
+  const k = kicadPart({
+    def: toggle,
+    comp: { params: toggle.normalizeParams({}) },
+  });
+  assert.equal(k.generic, "pushButtonFootprint");
+  assert.match(k.footprint, /:SW_PUSH_6mm$/);
+  assert.match(en.export.reason.pushButtonFootprint, /6 mm push-button/);
+  assert.ok(seen.has("genericFootprint"), "the pin headers still say so");
 });
 
 test("the report names what does not come across as it is", () => {
@@ -669,5 +705,80 @@ test("a timer's RC terminal is a PASSIVE pin, its trigger an input", () => {
   assert.equal(types.get("3"), "output", "OUT");
   for (const pad of ["5", "6", "7"]) {
     assert.equal(types.get(pad), "passive", `pin ${pad}`);
+  }
+});
+
+// ── A box's power pins clear its part number ─────────────────────────────────
+
+/**
+ * Each boxed library symbol in an export, with how far its body reaches above
+ * and below the centred Value and how far its top/bottom pins' names reach in.
+ */
+function boxClearances(res) {
+  const lib = parseSexpr(
+    res.files.find((f) => f.name.endsWith(".kicad_sym")).text,
+  );
+  return kids(lib, "symbol").flatMap((sym) => {
+    // A compact shape (a resistor, a pot) hides its pin names.
+    if (kid(sym, "pin_names")?.includes("hide")) return [];
+    const units = kids(sym, "symbol");
+    const rect = units.flatMap((u) => kids(u, "rectangle"))[0];
+    if (!rect) return [];
+    const half = Math.abs(Number(kid(rect, "start")[2]));
+    const names = units
+      .flatMap((u) => kids(u, "pin"))
+      .filter((pin) => [90, 270].includes(Number(kid(pin, "at")[3])))
+      .map((pin) => str(kid(pin, "name")[1]).replace(/[~_^]\{|\}/g, ""));
+    if (!names.length) return [];
+    const reach = Math.max(...names.map((n) => n.length * CHAR_W));
+    return [{ name: str(sym[1]), half, reach: PIN_NAME_OFFSET + reach }];
+  });
+}
+
+test("a small chip's box is tall enough for its power pins' names and its part number", () => {
+  // The 6-pin designed chip that exported with GND, VCC and CUSTOM1 drawn
+  // over one another: three rows made a box 10.16 tall.
+  const chip = {
+    ...newCustomChip([]),
+    pinsPerSide: 3,
+    units: [{ A: [1], B: [2], Y: [5] }],
+    vcc: 6,
+    gnd: 3,
+  };
+  setCustomChips([chip]);
+  try {
+    const doc = new DeskDoc(null);
+    doc.addBoard("pins-full", 0, 0);
+    doc.addComponent({
+      kind: "chip",
+      ref: chip.id,
+      board: "bb1",
+      anchor: "e5",
+    });
+    const res = exportKicad(doc.toJSON(), { tabId: "t1", name: "Small" });
+    const [box] = boxClearances(res);
+    assert.ok(box, "the custom chip exports as a box");
+    assert.ok(
+      box.half >= box.reach + GRID,
+      `half-height ${box.half} clears names reaching ${box.reach}`,
+    );
+    // Its library symbol is named by its part number, never its internal id.
+    const lib = res.files.find((f) => f.name.endsWith(".kicad_sym")).text;
+    assert.match(lib, /\(property "Value" "CUSTOM1"/);
+    assert.doesNotMatch(lib, /\(property "Value" "custom-/);
+  } finally {
+    setCustomChips([]);
+  }
+});
+
+test("every demo bench's boxes keep their power pins' names clear of the part number", () => {
+  for (const { ref, doc } of demoDocs()) {
+    const res = exportKicad(doc, { tabId: "t1", name: ref });
+    for (const box of boxClearances(res)) {
+      assert.ok(
+        box.half >= box.reach + GRID,
+        `${ref}: ${box.name}'s half-height ${box.half} against ${box.reach}`,
+      );
+    }
   }
 });

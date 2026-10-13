@@ -31,7 +31,11 @@ import {
   isWidePackage,
   packageSpec,
   pinOffset,
+  seatedRows,
   seatRow,
+  seatsWide,
+  WIDE_SEAT_ROWS,
+  withSeat,
 } from "../model/footprints.js";
 
 test("packageSpec: known packages; junk throws INVALID_PACKAGE", () => {
@@ -102,9 +106,54 @@ test("pinOffset: a 600-mil package seats six pitches across, rows d and h", () =
   // seating gave it, kept as it was.
   assert.deepEqual(pinOffset("DIP-28", 1, "e"), { row: "e", dcol: 0 });
   assert.deepEqual(pinOffset("DIP-28", 28, "e"), { row: "f", dcol: 0 });
-  // A 300-mil package has no wide seat, and nothing anchors in another row.
+  // …and the other wide seats are rows b/f, c/g and e/i (the last only with
+  // the chip's e/i marker, since row e alone is the narrow seat).
+  assert.deepEqual(pinOffset("DIP-28", 28, "b"), { row: "f", dcol: 0 });
+  assert.deepEqual(pinOffset("DIP-28", 28, "c"), { row: "g", dcol: 0 });
+  assert.deepEqual(pinOffset("DIP-28", 1, "e", true), { row: "e", dcol: 0 });
+  assert.deepEqual(pinOffset("DIP-28", 28, "e", true), { row: "i", dcol: 0 });
+  // A 300-mil package has no wide seat (its marker is ignored), and nothing
+  // anchors in a row with no partner six pitches across the trench.
   assert.equal(pinOffset("DIP-14", 1, "d"), null);
-  assert.equal(pinOffset("DIP-28", 1, "c"), null);
+  assert.deepEqual(pinOffset("DIP-14", 14, "e", true), { row: "f", dcol: 0 });
+  assert.equal(pinOffset("DIP-28", 1, "a"), null);
+  assert.equal(pinOffset("DIP-28", 1, "f"), null);
+});
+
+test("dipRows: four wide seats, six pitches apart across the trench, the three rows between covered", () => {
+  assert.deepEqual([...WIDE_SEAT_ROWS], ["b", "c", "d", "e"]);
+  const seats = {
+    b: ["f", ["c", "d", "e"]],
+    c: ["g", ["d", "e", "f"]],
+    d: ["h", ["e", "f", "g"]],
+    e: ["i", ["f", "g", "h"]],
+  };
+  for (const [row, [upper, covers]] of Object.entries(seats)) {
+    const rows = dipRows("DIP-40", row, row === "e");
+    assert.deepEqual(
+      [rows.lower, rows.upper, rows.span, [...rows.covers]],
+      [row, upper, 6, covers],
+      row,
+    );
+    // The marker means nothing outside row e.
+    assert.equal(dipRows("DIP-40", row, true), dipRows("DIP-40", row, row === "e")); // prettier-ignore
+  }
+  assert.equal(dipRows("DIP-40", "e").upper, "f"); // no marker: the narrow seat
+});
+
+test("withSeat / seatedRows: the e/i marker is kept only where it means something", () => {
+  assert.deepEqual(withSeat("DIP-28", { rot: 180 }, "e", true), { rot: 180, wide: true }); // prettier-ignore
+  assert.deepEqual(withSeat("DIP-28", { rot: 180, wide: true }, "d", false), { rot: 180 }); // prettier-ignore
+  assert.deepEqual(withSeat("DIP-28", { wide: true }, "e", false), {});
+  // A wide flag on any other row is dropped: the row says the seat by itself.
+  assert.deepEqual(withSeat("DIP-28", {}, "c", true), {});
+  assert.deepEqual(withSeat("DIP-14", {}, "e", true), {}); // 300-mil: no e/i seat
+  assert.equal(seatsWide({ wide: true }), true);
+  assert.equal(seatsWide({ wide: "yes" }), false);
+  assert.equal(seatedRows("DIP-28", "e12", { wide: true }).upper, "i");
+  assert.equal(seatedRows("DIP-28", "e12", {}).upper, "f");
+  assert.equal(seatedRows("DIP-28", "b12", null).upper, "f");
+  assert.equal(seatedRows("DIP-28", "a12", null), null);
 });
 
 test("seatRow / dipRows: the body width decides the rows, the anchor row the seat", () => {
@@ -122,7 +171,10 @@ test("seatRow / dipRows: the body width decides the rows, the anchor row the sea
     assert.deepEqual([...rows.covers], wide ? ["e", "f", "g"] : [], pkg);
     // Row e is a seat every package can have.
     assert.deepEqual([dipRows(pkg, "e").lower, dipRows(pkg, "e").upper], ["e", "f"]); // prettier-ignore
-    assert.equal(dipRows(pkg, "d") !== null, wide, pkg);
+    for (const row of ["b", "c", "d"]) {
+      assert.equal(dipRows(pkg, row) !== null, wide, `${pkg} ${row}`);
+    }
+    assert.equal(dipRows(pkg, "a"), null, pkg);
   }
   assert.throws(() => dipRows("DIP-12", "e"), { code: "INVALID_PACKAGE" });
 });
@@ -139,6 +191,10 @@ test("coveredHoles: rows e, f and g in every column under a wide body; nothing u
   const pins = new Set(allPinHoles("DIP-24", 10).map((h) => `${h.row}${h.col}`)); // prettier-ignore
   assert.ok(holes.every((h) => !pins.has(`${h.row}${h.col}`)));
   assert.deepEqual(coveredHoles("DIP-24", 10, "e"), []);
+  // The e/i seat covers f, g and h; b/f covers c, d and e.
+  const rowsOf = (list) => [...new Set(list.map((h) => h.row))];
+  assert.deepEqual(rowsOf(coveredHoles("DIP-24", 10, "e", true)), ["f", "g", "h"]); // prettier-ignore
+  assert.deepEqual(rowsOf(coveredHoles("DIP-24", 10, "b")), ["c", "d", "e"]);
   assert.deepEqual(coveredHoles("DIP-14", 10), []);
 });
 

@@ -257,6 +257,33 @@ export function returned(over, cpu, state) {
   return cpu.pcOf(state) === over.ret && unwound(over, cpu, state);
 }
 
+/**
+ * An interrupt taken during a Step Over runs a handler whose instructions
+ * would stand as the one "run last" (`over.prev`, `#cameBack`) when its
+ * return lands back in the call — hiding the routine's own jump that came
+ * before it. So the record is set aside as an interrupt sequence begins,
+ * with the stack as it found it (`sp`, before the sequence pushes), and put
+ * back at the first instruction that starts with the stack there again: the
+ * handler has returned. Nested interrupts stack. One taken straight after
+ * another's return, at the SAME stack (the line still asserted), is the
+ * same set-aside — saving again would save the handler's own return. A
+ * reset is not one; it forgets them.
+ * Mutates `over`; called with each operation start, BEFORE `#cameBack`.
+ */
+export function carryAcrossInterrupt(over, started, sp) {
+  if (started === "instr") {
+    const top = over.held?.at(-1);
+    if (top && top.sp === sp) {
+      over.prev = top.prev;
+      over.held.pop();
+    }
+  } else if (started === "reset") {
+    over.held = null;
+  } else if (started && over.held?.at(-1)?.sp !== sp) {
+    (over.held ??= []).push({ prev: over.prev, sp });
+  }
+}
+
 export class SimController {
   #doc;
   #netlist;
@@ -1514,10 +1541,19 @@ export class SimController {
    * operand) comes back PAST them, so `returned` alone would leave the run
    * going until Pause. Back is an instruction starting
    *   · a little past the return address (within MAX_INLINE_BYTES),
-   *   · with the stack EXACTLY where the call found it,
-   *   · and NOTHING run between the return address and here since the Step
+   *   · with the stack where the call found it (`unwound`, as `returned`
+   *     takes it — a routine may drop a byte or two of its caller's too),
+   *   · NOTHING run between the return address and here since the Step
    *     Over began (`over.ran`, the nearest instruction start in that window
-   *     — `#noteRan`): what lies there is the arguments, never executed.
+   *     — `#noteRan`): what lies there is the arguments, never executed,
+   *   · and, when the instruction just run lies further into the window (a
+   *     routine placed right after its own call site), not arrived at by a
+   *     jump that NAMES its target (`isJump`: JMP/JP nn, JR, a branch) —
+   *     that is the routine going to a helper below its entry, which meets
+   *     the three tests above as well. A return or a computed jump (`JP
+   *     (HL)`, `JMP (ptr)` — the inline-argument routine's own way back)
+   *     still counts. Only that one case reads memory: the instruction run
+   *     last, decoded through the circuit as the monitor does.
    * Such a routine pops its return address, so inside it the stack stands at
    * the call's level too — but a stop there would be somewhere code HAS run
    * since: a routine near the call site has run its own instructions, a
@@ -1526,22 +1562,39 @@ export class SimController {
    * matters (an argument ending in an RST opcode, a string with a space —
    * JSR — two from its end, both read as "a call returning here" once), nor
    * how it got here (a RET, an interrupt's return after it, a computed jump
-   * past the arguments). No memory is read: the test is three numbers.
+   * past the arguments).
    */
   #cameBack(over, cpu, state) {
     const past = (cpu.pcOf(state) - over.ret) & 0xffff;
     if (past === 0 || past > MAX_INLINE_BYTES) return false;
-    if (((over.sp - cpu.spOf(state)) & over.mask) !== 0) return false;
-    return over.ran == null || over.ran >= past;
+    if (!unwound(over, cpu, state)) return false;
+    if (over.ran != null && over.ran < past) return false;
+    const prev = over.prev;
+    if (prev != null && prev > past && prev <= MAX_INLINE_BYTES) {
+      return !this.#jumpedFrom(over, cpu, (over.ret + prev) & 0xffff);
+    }
+    return true;
+  }
+
+  /** Is the instruction at `pc` a jump that names its target (`isJump`)?
+      Read through the circuit as the last tick left it; unreadable is no. */
+  #jumpedFrom(over, cpu, pc) {
+    const tick = this.#lastTick;
+    if (!cpu.isJump || !tick) return false;
+    const env = this.#cpuEnv(over.compId, tick.result, tick.netlist);
+    if (!env) return false;
+    return cpu.isJump(cpu.disassemble(this.#cpuMap.reader(env), pc));
   }
 
   /** An instruction began at `pc` while Step Over `over` ran: kept as the
-      nearest start at or past its return address, within the window. */
+      nearest start at or past its return address, within the window, and
+      as the one run last (`over.prev`, its offset). */
   #noteRan(over, pc) {
     const at = (pc - over.ret) & 0xffff;
     if (at <= MAX_INLINE_BYTES && (over.ran == null || at < over.ran)) {
       over.ran = at;
     }
+    over.prev = at;
   }
 
   /** One tick, into every CPU's record — and a breakpoint, if one was hit. */
@@ -1566,6 +1619,11 @@ export class SimController {
         }
       }
       if (!started) continue;
+      const sp = cpu.spOf(state);
+      if (step?.compId === id && step.over) carryAcrossInterrupt(step.over, started, sp); // prettier-ignore
+      if (this.#overStop?.compId === id && this.#overStop !== step?.over) {
+        carryAcrossInterrupt(this.#overStop, started, sp);
+      }
       const back = (o) =>
         started === "instr" &&
         (returned(o, cpu, state) || this.#cameBack(o, cpu, state));
@@ -1659,6 +1717,8 @@ export class SimController {
       sp: env.cpu.spOf(state),
       mask: env.cpu.spMask,
       ran: null, // see #cameBack
+      prev: null, // …and the instruction run last
+      held: null, // …set aside while an interrupt runs (carryAcrossInterrupt)
     };
     if (this.#runCpuStep({ compId, done: false, over }, MAX_OVER_EDGES)) {
       return "done";

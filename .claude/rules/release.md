@@ -34,8 +34,30 @@ to turn this on.
   (`updater.readyToInstall`, from main's `updater:install`): on macOS, while Squirrel is
   still taking the download (`squirrelDownloadedUpdate === false`), main pushes
   `updater:preparing` (an UpdaterMonitor toast) and waits on its own native listener, up
-  to `SQUIRREL_WAIT_MS` (5 min; a second Restart joins the wait; a quit ends it), and
-  only THEN asks the close guard and installs. Asked first, the guard's "go" stood —
+  to `SQUIRREL_WAIT_MS` (5 min; a second Restart joins the wait — and main's
+  `restartToUpdate` is one promise, so N presses install once; an updater `error` that
+  is not a check's ends it at once, as a no). Squirrel FAILING the download — refusing
+  it (recorded by initUpdater's own error handler whenever it comes, usually long before
+  Restart, since Squirrel starts on the download as it lands) or a wait for it running
+  out — sets `squirrelRefused`: a Restart then answers no AT ONCE (`installBlocked()`;
+  main's `updater:install-failed` carries `{blocked}`, and the toast offers Check for
+  Updates instead of Restart — a new download clears it). There is deliberately NO
+  automatic retry (tried 2026-10-12 and removed): a check started under the wait
+  announced its own "available"/"ready" over the "preparing", and one that found
+  nothing left the wait to run out. Only THEN does main ask the
+  close guard and installs. A before-quit does NOT end it: a quit the user then cancels
+  leaves the app open and the Restart still wanted. No check starts during the wait
+  (electron-updater would re-serve the download Squirrel is reading — a manual one is
+  answered `updater:preparing`). The preparing toast is sticky and keeps the Restart
+  action; when the wait ends ready, main re-pushes `updater:downloaded`
+  (`downloadedVersion()`), so a Cancel on the question leaves the offer, not a stale
+  "preparing" (Settings ▸ About's line says it too). `updater:error` carries `manual`
+  only for a CHECK's own failure — its search (`manualCheck && errorWasCheck`) or the
+  download it started (`downloading`, set at `update-available`, since the check answers
+  before its download does; consumed only by a non-check error, so an overlapping
+  check's failure is not taken for it): the flag outlives its check, and an install's error
+  (Squirrel's, possibly reported twice) said "check failed" over the install-failed
+  toast. Asked first, the guard's "go" stood —
   autosave stopped, no question on quit — for as long as Squirrel took (2026-10-11).
 - **A clicked install that does not happen is taken back, and leaves nothing armed**
   (`quitAndInstall` in `updater.js`): an error, or no quit within `INSTALL_DEADLINE_MS`,

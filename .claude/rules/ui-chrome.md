@@ -181,12 +181,16 @@ the ×'s box) in one `.popup-header-actions` group LEFT of the ×.
   with no fields; Delete while `#editingLocked`), so the menu's shape never changes, only
   its enabled state. There is no Rotate (rotating a placed, selected part is `R` only, in
   `handleKeyDown`) and no "Replace chip" (**Stop** restores every damaged chip). There
-  are two deliberate exceptions, each a part with something running INSIDE it. A CUSTOM
+  are three deliberate exceptions, each a part with a WINDOW of its own, and its opener
+  sits at the menu's top level, never inside Properties… (Jason, 2026-10-12). A CUSTOM
   chip (`#customChipMenuItems`) adds Open in Chip Designer and Break on Settled between
   Properties… and Delete (see "Custom chips"; a LINE breakpoint is set in the designer's
   gutter). Its Pin Assignment is the ordinary pinout window, handed the chip by the app
   window. A CPU (`#cpuMenuItems`, gated on `isCpu(def)`) adds **Open CPU Monitor** in the
-  same place (see "Auxiliary windows").
+  same place (see "Auxiliary windows"). A MEMORY chip (`#memoryMenuItems`, gated on
+  `isMemory(def)`) adds **Inspect Memory** there too — it was a Properties action until
+  2026-10-12; a ROM's **Load image… (program)** is still one, being a file pick, not a
+  window.
 - **Part Properties dialog** (`components/part-properties-dialog.js`) is the ONE shared
   modal every **Properties…** opens, enabled when
   `DeskController.#propertyFieldsFor(comp, def)` returns at least one field. **A catalog

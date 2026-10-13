@@ -18,7 +18,7 @@
  */
 
 // The DeskController's memory-chip lifecycle (Feature 190): a memory chip's
-// context menu carries an "Inspect memory…" item that opens the INSPECTOR
+// context menu carries an "Inspect Memory" item that opens the INSPECTOR
 // (separate from its "Pin Assignment" item, which opens the pinout); placing
 // a non-volatile ROM mints a backing-file GUID + creates its file; a volatile
 // SRAM gets neither; removing a ROM deletes its file; and setMemoryProgrammed
@@ -31,6 +31,7 @@ import { resetDom } from "./jsdom-setup.js";
 import { DeskDoc } from "../model/desk-doc.js";
 
 const { DeskController } = await import("../components/desk-controller.js");
+const { PopupManager } = await import("../popup-manager.js");
 
 const GUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -72,7 +73,7 @@ const pickMenuItem = (elem, label) => {
   item.click();
 };
 
-test('a memory chip\'s Properties dialog "Inspect memory…" action opens the INSPECTOR, not the pinout', () => {
+test('a memory chip\'s "Inspect Memory" menu item opens the INSPECTOR, not the pinout', () => {
   resetDom();
   const opened = [];
   const pinouts = [];
@@ -86,17 +87,78 @@ test('a memory chip\'s Properties dialog "Inspect memory…" action opens the IN
   controller.addComponentAt("rom-8k", "bb1", "e5");
   const id = chipId(doc, "rom-8k");
 
-  // The context menu's own items are always Pin Assignment / Properties… /
-  // Delete Component — memory actions live inside the Properties dialog.
-  pickMenuItem(surface.querySelector(".part-chip"), "Properties…");
-  const action = [...document.querySelectorAll(".properties-action")].find(
-    (b) => b.textContent.trim() === "Inspect memory…",
-  );
-  assert.ok(action, '"Inspect memory…" is a Properties dialog action');
-  action.click();
+  // The inspector is a window of its own, so it opens from the TOP level of
+  // the menu — as the CPU monitor and the chip designer do.
+  pickMenuItem(surface.querySelector(".part-chip"), "Inspect Memory");
 
   assert.deepEqual(opened, [id], "the inspector opens for this component");
   assert.deepEqual(pinouts, [], "and the pinout window does NOT open");
+
+  // …and it is no longer inside Properties (where Load image… still is).
+  pickMenuItem(surface.querySelector(".part-chip"), "Properties…");
+  const actions = [...document.querySelectorAll(".properties-action")].map(
+    (b) => b.textContent.trim(),
+  );
+  assert.ok(
+    !actions.some((a) => /inspect/i.test(a)),
+    "not a Properties action",
+  );
+  assert.ok(actions.includes("Load image… (program)"), "programming stays");
+  PopupManager.close();
+});
+
+test("a part that is not a memory chip has no Inspect Memory item", () => {
+  resetDom();
+  const doc = new DeskDoc(null);
+  doc.addBoard("pins-full", 0, 0);
+  const { surface, controller } = makeDesk(doc);
+  controller.addComponentAt("74LS00", "bb1", "e5");
+  surface.querySelector(".part-chip").dispatchEvent(
+    new window.MouseEvent("contextmenu", {
+      bubbles: true,
+      clientX: 10,
+      clientY: 10,
+    }),
+  );
+  const labels = [...document.querySelectorAll(".popup-menu-item")].map((b) =>
+    b.textContent.trim(),
+  );
+  assert.ok(labels.includes("Properties…"), "the menu is open");
+  assert.ok(!labels.includes("Inspect Memory"));
+});
+
+test('a ROM with unsaved inspector edits says "edited, not saved" until they are saved', () => {
+  resetDom();
+  const doc = new DeskDoc(null);
+  doc.addBoard("pins-full", 0, 0);
+  const { surface, controller } = makeDesk(doc, {
+    onCreateMemoryFile: () => {},
+  });
+  controller.addComponentAt("rom-8k", "bb1", "e5");
+  const id = chipId(doc, "rom-8k");
+  const chip = () => surface.querySelector(".part-chip");
+  const hint = () => chip().querySelector(".part-chip-status > title")?.textContent; // prettier-ignore
+  assert.match(hint(), /^Not programmed/, "a fresh ROM: no image loaded");
+
+  controller.setMemoryUnsaved(id, true);
+  assert.ok(chip().classList.contains("part-chip--unsaved"));
+  assert.match(hint(), /^Edited, not saved/, "the edits speak first");
+  // …and in the Properties card, beside "not programmed" (still true).
+  pickMenuItem(chip(), "Properties…");
+  const warnings = [...document.querySelectorAll(".properties-warning-text")]
+    .map((w) => w.textContent)
+    .join("\n");
+  assert.match(warnings, /Edited, not saved/);
+  assert.match(warnings, /Not programmed/);
+  PopupManager.close();
+
+  // A rebuild (an undo, a remount) keeps it while the inspector has them.
+  controller.setMemoryProgrammed(id, true, { edited: true });
+  assert.ok(chip().classList.contains("part-chip--unsaved"), "kept on remount"); // prettier-ignore
+
+  controller.setMemoryUnsaved(id, false); // saved (or the window closed)
+  assert.ok(!chip().classList.contains("part-chip--unsaved"));
+  assert.ok(!chip().classList.contains("part-chip--unprogrammed"), "programmed now"); // prettier-ignore
 });
 
 test("placing a ROM mints a GUID + creates its backing file", () => {
@@ -163,10 +225,18 @@ test("setMemoryProgrammed flags a ROM (and only a memory chip)", () => {
   controller.addComponentAt("rom-8k", "bb1", "e5");
   const id = chipId(doc, "rom-8k");
 
-  controller.setMemoryProgrammed(id, true);
+  assert.equal(controller.setMemoryProgrammed(id, true), true);
   assert.equal(doc.getComponent(id).params.programmed, true);
   controller.setMemoryProgrammed(id, false);
   assert.equal(doc.getComponent(id).params.programmed, undefined, "cleared");
+  // Says whether it flagged anything: no chip, or not the chip whose file
+  // a write went to (another placed since under the same id), is a no.
+  const guid = doc.getComponent(id).params.storage.guid;
+  assert.equal(controller.setMemoryProgrammed("c99", true), false);
+  assert.equal(controller.setMemoryProgrammed(id, true, {}, { guid: "ffffffff-0000-0000-0000-000000000000" }), false); // prettier-ignore
+  assert.equal(doc.getComponent(id).params.programmed, undefined, "untouched");
+  assert.equal(controller.setMemoryProgrammed(id, true, {}, { guid }), true);
+  assert.equal(doc.getComponent(id).params.programmed, true);
 });
 
 test("setMemoryProgrammed records which file a ROM was loaded from", () => {

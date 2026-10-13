@@ -75,6 +75,7 @@ function startInspector() {
   let guid = null;
   let running = false;
   let dirty = false;
+  let reported = false; // what the host was last told of `dirty`
 
   // ── Toolbar ─────────────────────────────────────────────────────────────────
   const statusLabel = el("span", {
@@ -209,6 +210,12 @@ function startInspector() {
   }
   function updateSaveEnabled() {
     saveBtn.disabled = running || chipVolatile || !dirty;
+    // The desk says so too ("edited, not saved" on the chip): the circuit
+    // reads the chip's file, which these edits have not reached yet.
+    if (dirty !== reported) {
+      reported = dirty;
+      bridge?.memory?.toHost(compId, { kind: "edits", unsaved: dirty });
+    }
   }
   function markDirty() {
     dirty = true;
@@ -292,6 +299,15 @@ function startInspector() {
     if (id !== compId || !msg) return;
     if (msg.kind === "context") applyContext(msg);
     else if (msg.kind === "bytes") grid.applyChanges(msg.changes ?? []);
+    else if (msg.kind === "saved") {
+      source = msg.source ?? null;
+      sourceEdited = msg.edited === true;
+      updateUI();
+    } else if (msg.kind === "save-failed") {
+      // The host said why; the edits are still only here — Save again.
+      dirty = true;
+      updateSaveEnabled();
+    }
   });
 
   // Announce we're ready; the host replies with our context.

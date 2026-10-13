@@ -590,6 +590,9 @@ function potentiometerParams(raw) {
     position: Number.isFinite(position)
       ? Math.min(100, Math.max(0, Math.round(position)))
       : 50,
+    // Turned end for end (R): stored only when set, so an unturned part
+    // round-trips byte-identical.
+    ...(raw?.rot === 180 ? { rot: 180 } : {}),
   };
 }
 
@@ -1119,11 +1122,16 @@ export const PART_DEFS = Object.freeze(
         "to pin 3 the rest: 100k at 10 % is 10k to pin 1 and 90k to pin 3. " +
         "Like a resistor, each side is a WEAK coupler, read by the timing " +
         "parts — except a side with nothing left of the track (pin 1 at 0 %, " +
-        "pin 3 at 100 %), which is a wire, and an LED fed through it burns.",
+        "pin 3 at 100 %), which is a wire, and an LED fed through it burns. " +
+        "Press R while placing, or with it selected, to turn it end for end: " +
+        "pins 1 and 3 swap ends and the screw moves to the other side.",
       group: "Resistors",
       // A Bourns 3296W-style trimmer: three pins in a row at 0.1 in, the
       // wiper in the middle.
       footprint: Object.freeze({ offsets: Object.freeze([0, 1, 2]) }),
+      // Turns end for end in place (params.rot 180), as a transistor does:
+      // the same three holes, pins 1 and 3 swapped; the wiper stays put.
+      reversible: true,
       properties: [POT_RESISTANCE_FIELD, POSITION_FIELD],
       pins: [
         {

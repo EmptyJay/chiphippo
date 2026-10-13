@@ -160,10 +160,25 @@ paths:
       wrap round to read as shallow), so a recursive call's inner return does not count — OR
       (`#cameBack`) where a routine that skips its inline arguments (`JSR PRIMM /
       .byte …`, an RST that steps its return address) comes back: an instruction start
-      within `MAX_INLINE_BYTES` past the return address, the stack EXACTLY where the
-      call found it, and NOTHING run between the return address and it since the Step
-      Over began (`over.ran`, the nearest start in the window, kept by `#noteRan`) — the
-      bytes there are the arguments, never executed. Such a routine pops its return
+      within `MAX_INLINE_BYTES` past the return address, the stack where the call found
+      it (`unwound`, the same `SHALLOW_SLACK` as `returned`), NOTHING run between the
+      return address and it since the Step Over began (`over.ran`, the nearest start in
+      the window, kept by `#noteRan`) — the bytes there are the arguments, never
+      executed — and, when the instruction run last (`over.prev`) lies further into the
+      window (a routine right after its call site), that instruction NOT a jump naming
+      its target (the descriptor's `isJump`: JMP abs/BRA/branches/BBR/BBS; JP nn/JP cc/
+      JR/JR cc/DJNZ) — that is the routine going to a helper below its entry. A return
+      or a computed jump (`JP (HL)`, `JMP (ptr)`, the inline-argument routine's idiomatic
+      way back) still counts. Only that case reads memory (`#jumpedFrom`, one decode
+      through the circuit; `CpuMemoryMap` keeps its pages per CPU). An interrupt taken
+      meanwhile sets `over.prev` aside and puts it back at its return
+      (`carryAcrossInterrupt`: the first instruction with the stack where the sequence
+      found it; one taken straight after another's return at the SAME stack is not
+      set aside twice; a reset forgets them), so a handler cannot hide the routine's
+      jump. A return through a
+      SELF-MODIFIED `JMP abs` reads as a jump and runs on to Pause — undecidable from the
+      instruction, and the safe miss. A stack-only test here REGRESSED `POP HL · INC HL · JP (HL)`
+      (2026-10-12). Such a routine pops its return
       address, so inside it the stack is at the call's level too; a stop there would be
       somewhere code has run (its own instructions, a nested CALL, an untaken RET cc).
       Two earlier rules guessed from the bytes BEFORE the landing (is it a call ending

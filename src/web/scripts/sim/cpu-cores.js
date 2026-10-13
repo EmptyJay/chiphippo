@@ -38,7 +38,10 @@
 //     status, as the monitor prints them, and the memory access in flight;
 //   · `disassemble(read, addr)` — its instruction set's disassembler, and
 //     `isCall(line)` — whether a decoded line calls a subroutine (what the
-//     monitor's Step Over is offered for);
+//     monitor's Step Over is offered for), and `isJump(line)` — whether it
+//     jumps to a target it NAMES (a JMP/JP, a branch), not a computed one
+//     or a return (Step Over's test for a routine come back past its inline
+//     arguments — sim-controller.js `#cameBack`);
 //   · `spOf(state)` + `spMask` — the stack pointer as the operation in flight
 //     began, and its width: Step Over's test for a call that has RETURNED
 //     (back at the return address, the stack no deeper than it was);
@@ -131,6 +134,13 @@ export function w65c02Monitor(pins) {
     },
 
     isCall: (line) => line?.bytes?.[0] === 0x20, // JSR
+
+    // JMP abs, BRA, the branches (xxx10000) and BBR/BBS (xxxx1111).
+    isJump: (line) => {
+      const op = line?.bytes?.[0];
+      if (op == null) return false;
+      return op === 0x4c || op === 0x80 || (op & 0x1f) === 0x10 || (op & 0x0f) === 0x0f; // prettier-ignore
+    },
 
     // Waiting for an interrupt (WAI) or stopped for good (STP): no
     // instruction starts until it is over.
@@ -243,6 +253,15 @@ const z80Opcode = (line) => line?.bytes?.find((b) => b !== 0xdd && b !== 0xfd);
 const isZ80Call = (op) =>
   op === 0xcd || (op & 0xc7) === 0xc4 || (op & 0xc7) === 0xc7;
 
+/** JP nn, JP cc,nn, JR, JR cc and DJNZ — the jumps that name their target
+    (JP (HL)/(IX)/(IY) is computed: E9 past its prefix). */
+const isZ80Jump = (op) =>
+  op === 0xc3 ||
+  (op & 0xc7) === 0xc2 ||
+  op === 0x18 ||
+  op === 0x10 ||
+  (op & 0xe7) === 0x20;
+
 /** The Z80's descriptor — as `w65c02Monitor`. */
 export function z80Monitor(pins) {
   const { addr, data, clk } = pins;
@@ -289,6 +308,7 @@ export function z80Monitor(pins) {
 
     // Past any DD/FD prefix: the core runs `DD CD nn nn` as the CALL it is.
     isCall: (line) => isZ80Call(z80Opcode(line)),
+    isJump: (line) => isZ80Jump(z80Opcode(line)),
 
     // Halted: the NOP it fetches over and over starts nothing.
     waiting: (s) => s.halted === true && s.cur === "instr",

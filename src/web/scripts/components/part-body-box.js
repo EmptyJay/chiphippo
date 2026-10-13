@@ -20,6 +20,7 @@
 // part-body-box.js — a seated part's drawn body, for the auto-router.
 
 import { partDef } from "../catalog/index.js";
+import { seatsWide } from "../model/footprints.js";
 import { chipBodyBox } from "./chip-view.js";
 import { discreteBox } from "./discrete-view.js";
 
@@ -48,7 +49,9 @@ export function partBodyBox(comp) {
     if (!def) return null;
     if (def.rotatable && comp.params?.rot === 90) return null;
     if (comp.kind === "chip") {
-      return def.package ? chipBodyBox(def.package, comp.anchor) : null;
+      return def.package
+        ? chipBodyBox(def.package, comp.anchor, seatsWide(comp.params))
+        : null;
     }
     return discreteBox(comp.ref, comp.params?.rot, comp.params);
   } catch {

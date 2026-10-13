@@ -112,6 +112,7 @@ import {
   partPinAddresses,
   partPinHoles,
 } from "./occupancy.js";
+import { withSeat } from "./footprints.js";
 
 /**
  * The schema version stamped on every document this side writes.
@@ -1802,11 +1803,14 @@ export class DeskDoc {
   }
 
   /**
-   * Re-seat a board part (same or another board). Throws NOT_FOUND /
+   * Re-seat a board part (same or another board). `wide` — a DIP's only — says
+   * whether a seat with pin 1 in row e is the 600-mil e/i seat (seating.js
+   * `partSeatAt` answers it; footprints.js `withSeat` keeps it in the chip's
+   * params); left out, the part keeps the params it has. Throws NOT_FOUND /
    * INVALID_KIND (PSUs move with movePsu) / ILLEGAL_PLACEMENT. Returns a
    * copy of the updated component.
    */
-  moveComponent(id, boardId, anchor) {
+  moveComponent(id, boardId, anchor, { wide } = {}) {
     const comp = this.#doc.components.find((c) => c.id === id);
     if (!comp) throw taggedError(`no component ${id}`, "NOT_FOUND");
     if (comp.board == null) {
@@ -1816,11 +1820,9 @@ export class DeskDoc {
     if (!this.#doc.boards.some((b) => b.id === boardId)) {
       throw taggedError(`no board ${boardId}`, "NOT_FOUND");
     }
+    const params = this.#seatParams(comp, anchor, wide);
     if (
-      !this.canPlacePart(comp.ref, boardId, anchor, {
-        ignoreId: id,
-        params: comp.params,
-      })
+      !this.canPlacePart(comp.ref, boardId, anchor, { ignoreId: id, params })
     ) {
       throw taggedError(
         `${id} cannot seat at ${boardId}.${anchor}`,
@@ -1829,7 +1831,17 @@ export class DeskDoc {
     }
     comp.board = boardId;
     comp.anchor = anchor;
+    comp.params = params;
     return { ...comp };
+  }
+
+  /** A component's params re-seated with pin 1 at `anchor`: a DIP's e/i
+      marker as `wide` says (footprints.js `withSeat`), when it says; every
+      other part's, and a DIP's without `wide`, as they are. */
+  #seatParams(comp, anchor, wide) {
+    const pkg = partDef(comp.ref)?.package;
+    if (!pkg || wide === undefined) return comp.params;
+    return withSeat(pkg, comp.params, String(anchor).charAt(0), wide);
   }
 
   // ── Re-seating a part WITH its wiring (Feature 290, the Option-drag) ──────
@@ -1871,13 +1883,18 @@ export class DeskDoc {
    * A solo Option-drag IS a one-member cluster, so this is the cluster commit
    * with the dragged part put at the head of the placements — one transaction
    * rule and one legality rule for both gestures rather than two that could
-   * drift apart. `plan` is a `planPartMove` result. Throws ILLEGAL_PLACEMENT.
+   * drift apart. `plan` is a `planPartMove` result; `wide` is moveComponent's.
+   * Throws ILLEGAL_PLACEMENT.
    *
    * @returns {{component:object, wires:Array}} copies of what moved.
    */
-  moveComponentWithWires(id, boardId, anchor, plan) {
+  moveComponentWithWires(id, boardId, anchor, plan, { wide } = {}) {
+    const comp = this.#doc.components.find((c) => c.id === id);
+    const params = comp ? this.#seatParams(comp, anchor, wide) : undefined;
+    const head = { id, board: boardId, anchor };
+    if (comp && params !== comp.params) head.params = params;
     const { components, wires } = this.moveClusterWithWires(
-      [{ id, board: boardId, anchor }, ...(plan?.parts ?? [])],
+      [head, ...(plan?.parts ?? [])],
       plan,
     );
     return { component: components[0], wires };

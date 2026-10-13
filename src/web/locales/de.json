@@ -298,6 +298,7 @@
       "availableVersion": "Version {version} ist verfügbar — wird im Hintergrund geladen…",
       "ready": "Das Update ist installationsbereit.",
       "readyVersion": "Version {version} ist installationsbereit.",
+      "preparing": "Das Update wird vorbereitet – Chip Hippo startet neu, sobald es bereit ist.",
       "upToDate": "Du verwendest die neueste Version von Chip Hippo.",
       "storeBuild": "Updates werden über den App Store ausgeliefert.",
       "devBuild": "Updates sind nur in installierten Versionen verfügbar.",
@@ -1223,7 +1224,8 @@
       "deleteSignal": "Signal löschen",
       "openChipDesigner": "Im Chip-Designer öffnen",
       "breakOnSettled": "Bei Ruhezustand anhalten",
-      "openCpuMonitor": "CPU-Monitor öffnen"
+      "openCpuMonitor": "CPU-Monitor öffnen",
+      "inspectMemory": "Speicher untersuchen"
     },
     "remove": {
       "confirm": "Entfernen",
@@ -1301,6 +1303,9 @@
     "failOpen": "Das Projekt konnte nicht geöffnet werden",
     "failSave": "Das Projekt konnte nicht gespeichert werden",
     "slotHeld": "Das ungesicherte Projekt der letzten Sitzung konnte nicht gelesen werden und bleibt deshalb dort, wo dieses gespeichert würde. Gib diesem Projekt mit „Speichern unter“ eine eigene Datei.",
+    "slotUnreadTitle": "Die Arbeit der letzten Sitzung konnte nicht gelesen werden",
+    "slotAside": "Das aus der letzten Sitzung aufbewahrte Projekt konnte nicht gelesen werden. Es wurde unverändert nach {path} verschoben, wo „Datei ▸ Öffnen“ es erreicht.",
+    "slotLeft": "Das aus der letzten Sitzung aufbewahrte Projekt konnte weder gelesen noch verschoben werden und bleibt deshalb unter {path}, damit der nächste Start es erneut versucht. Bis dahin lässt sich ein Projekt ohne eigene Datei nur mit „Speichern unter“ speichern.",
     "failClose": "Ungespeicherte Änderungen konnten nicht geprüft werden — speichern Sie Ihre Arbeit vor dem Beenden",
     "failLocation": "Es konnte kein Ort gewählt werden",
     "failDuplicate": "Das Arbeitsblatt konnte nicht dupliziert werden",
@@ -1339,6 +1344,7 @@
       "unmapped": "{format} hat nichts, was dafür platziert werden könnte",
       "clockConnector": "wird zu einem CLOCK-IN-Anschluss – auf einer Platine gehört dort ein Oszillator hin",
       "genericFootprint": "erhält einen Stiftleisten-Footprint – wählen Sie den des echten Bauteils",
+      "pushButtonFootprint": "erhält den Footprint eines 6-mm-Tasters, nur der Größe wegen – wählen Sie den des echten Bauteils",
       "resistorMerged": "wird zu einer Leitung: Ein Logiksimulator kennt keine Widerstände",
       "momentary": "wird zu einem Kippschalter: Digital hat keinen Tastkontakt",
       "unpowered": "wird in Digital versorgt, das keinen unversorgten Chip simulieren kann",
@@ -1485,6 +1491,7 @@
     "checkFailed": "Updatesuche fehlgeschlagen",
     "installFailed": "Update nicht installiert",
     "installFailedMessage": "Das Update konnte gerade nicht installiert werden, daher ist Chip Hippo weiterhin in dieser Version geöffnet. Klicke auf Neu starten, um es erneut zu versuchen.",
+    "installBlockedMessage": "macOS konnte das Update nicht zur Installation vorbereiten, daher ist Chip Hippo weiterhin in dieser Version geöffnet. Suche nach Updates, um es erneut herunterzuladen, oder lade es von chiphippo.com.",
     "preparing": "Update wird vorbereitet",
     "preparingMessage": "Chip Hippo startet mit der neuen Version neu, sobald sie bereit ist – vorher wird nach ungesicherten Änderungen gefragt. Du kannst so lange weiterarbeiten."
   },
@@ -1650,7 +1657,6 @@
       "sine": "Sinus"
     },
     "action": {
-      "inspectMemory": "Speicher untersuchen…",
       "programMemory": "Abbild laden… (programmieren)",
       "manageConnections": "Verbindungen verwalten…"
     },
@@ -1661,6 +1667,7 @@
       "reversed": "Versorgung verpolt — VCC und GND sind vertauscht.",
       "damaged": "Beschädigt — {volts} V liegen über den {rating} des Bauteils und haben den Rauch herausgelassen. Beim Anhalten der Simulation wird es wiederhergestellt.",
       "unprogrammed": "Nicht programmiert — es ist kein Abbild geladen, der Chip liest zufälliges Rauschen.",
+      "unsaved": "Bearbeitet, nicht gespeichert — der Speicher-Inspektor hat Änderungen, die die Datei dieses Chips noch nicht hat. Speichern Sie im Inspektor, um sie zu behalten.",
       "timing": "Zeitverhalten nicht erkannt — {problems}. Die Ausgänge bleiben in Ruhe, bis das Bauteil wie im Datenblatt beschaltet ist.",
       "heldOn": "Hält EIN — das Gate führt keinen Pegel, und die darauf verbliebene Ladung hält den Kanal leitend. Ein echtes Gate verliert diese Ladung; legen Sie es über einen Widerstand auf einen festen Pegel.",
       "heldOff": "Hält AUS — das Gate führt keinen Pegel, also bleibt er, wie er zuletzt angesteuert wurde (aus, solange das Gate noch nie angesteuert wurde). Ein echtes Gate driftet; legen Sie es über einen Widerstand auf einen festen Pegel.",

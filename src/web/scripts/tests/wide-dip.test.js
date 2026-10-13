@@ -22,6 +22,8 @@
 // e–g; a desk saved before wide seating keeps its narrow (e/f) seats exactly;
 // moving one alone re-seats it at its true width, carrying its wiring out from
 // under the body; and a group moves rigidly, keeping every chip's width.
+// The other wide seats — b/f, c/g and e/i (the last marked `wide` in the
+// chip's params) — join the same nets and follow the same rules.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -199,4 +201,102 @@ test("a pasted chip lands at the width it was copied at, or nowhere", () => {
   // A row up would be row e — the narrow seat. Refused rather than re-seated.
   const [up] = resolveCluster(target, cluster.members, { dx: 10, dy: -1 }, canBrick); // prettier-ignore
   assert.equal(up.legal, false);
+});
+
+test("every wide seat — b/f, c/g, d/h, e/i — loads and joins the same nets", () => {
+  // Each half-column is one strip, so pin 1 is in column 5's lower node and
+  // pin 28 in its upper node whichever pair of rows the chip straddles.
+  const seats = [
+    ["b5", {}, "f5", ["c", "d", "e"]],
+    ["c5", {}, "g5", ["d", "e", "f"]],
+    ["d5", {}, "h5", ["e", "f", "g"]],
+    ["e5", { wide: true }, "i5", ["f", "g", "h"]],
+  ];
+  for (const [anchor, params, pin28, covers] of seats) {
+    const doc = normalizeDocument(
+      raw({ components: [{ ...chip("c1", "HM62256", anchor), params }] }),
+    );
+    assert.equal(doc.components.length, 1, anchor);
+    assert.deepEqual(doc.components[0].params, params, anchor);
+    const occ = buildOccupancy(doc);
+    assert.equal(occ.get(`bb1.${anchor}`)?.pin, 1, anchor);
+    assert.equal(occ.get(`bb1.${pin28}`)?.pin, 28, anchor);
+    for (const row of covers) {
+      assert.equal(occ.get(`bb1.${row}6`)?.kind, "body", `${anchor} ${row}`);
+    }
+    const netlist = buildNetlist(doc);
+    const net = (hole) => netlist.netOfPoint.get(`bb1.${hole}`);
+    assert.equal(net(anchor), net("a5"), `${anchor} pin 1`);
+    assert.equal(net(pin28), net("j5"), `${anchor} pin 28`);
+  }
+});
+
+test("moving a chip alone writes the e/i marker its seat says, and only that", () => {
+  const doc = new DeskDoc(
+    raw({
+      components: [{ ...chip("c1", "HM62256", "d5"), params: { rot: 180 } }],
+    }),
+  );
+  doc.moveComponent("c1", "bb1", "e5", { wide: true });
+  assert.deepEqual(doc.getComponent("c1").params, { rot: 180, wide: true });
+  assert.equal(buildOccupancy(doc.toJSON()).get("bb1.h6")?.kind, "body");
+  // The seat that row e means without it is the narrow one, so leaving the
+  // marker out keeps it, and a move to another row drops it.
+  doc.moveComponent("c1", "bb1", "e9");
+  assert.equal(doc.getComponent("c1").params.wide, true);
+  doc.moveComponent("c1", "bb1", "b9", { wide: false });
+  assert.deepEqual(doc.getComponent("c1").params, { rot: 180 });
+  // A wire under the e/i body refuses the seat.
+  doc.addWire({ from: "bb1.g20", to: "bb1.a40" });
+  assert.throws(() => doc.moveComponent("c1", "bb1", "e15", { wide: true }), {
+    code: "ILLEGAL_PLACEMENT",
+  });
+  // …while the narrow seat there is free (g is above f).
+  doc.moveComponent("c1", "bb1", "e15", { wide: false });
+  assert.equal(doc.getComponent("c1").params.wide, undefined);
+});
+
+test("re-seating d/h → c/g carries its riders out of the new pin row and from under the body", () => {
+  // At d5/h5 a wire in c6 rides pin 2's node and one in i6 pin 27's. At c5/g5
+  // c6 is pin 2's own hole, so that rider travels with its pin, staying in the
+  // node; i6 stays put — row i is clear of a c/g chip.
+  const doc = new DeskDoc(
+    raw({
+      components: [chip("c1", "HM62256", "d5")],
+      wires: [wire("w1", "bb1.c6", "bb1.a40"), wire("w2", "bb1.i6", "bb1.a41")],
+    }),
+  );
+  const riding = doc.wiresRidingPart("c1");
+  const plan = doc.planPartMove("c1", { board: "bb1", anchor: "c5", riding });
+  assert.equal(plan.resolved, true);
+  const to = new Map(plan.moves.map((m) => [m.id, m.from]));
+  assert.notEqual(to.get("w1"), "bb1.c6");
+  assert.match(to.get("w1"), /^bb1\.[ab]6$/); // still pin 2's node
+  doc.moveComponentWithWires("c1", "bb1", "c5", plan, { wide: false });
+  assert.equal(doc.getComponent("c1").anchor, "c5");
+  const netlist = buildNetlist(doc.toJSON());
+  const net = (hole) => netlist.netOfPoint.get(`bb1.${hole}`);
+  assert.equal(net("a40"), net("c6"), "w1 still on pin 2");
+  assert.equal(net("a41"), net("g6"), "w2 still on pin 27");
+});
+
+test("moving into the e/i seat with its wiring writes the marker too", () => {
+  const doc = new DeskDoc(
+    raw({
+      components: [chip("c1", "HM62256", "d5")],
+      wires: [wire("w1", "bb1.j6", "bb1.a40")],
+    }),
+  );
+  const riding = doc.wiresRidingPart("c1");
+  const plan = doc.planPartMove("c1", {
+    board: "bb1",
+    anchor: "e5",
+    params: { wide: true },
+    riding,
+  });
+  assert.equal(plan.resolved, true);
+  doc.moveComponentWithWires("c1", "bb1", "e5", plan, { wide: true });
+  assert.deepEqual(doc.getComponent("c1").params, { wide: true });
+  const occ = buildOccupancy(doc.toJSON());
+  assert.equal(occ.get("bb1.i6")?.pin, 27);
 });

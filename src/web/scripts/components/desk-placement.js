@@ -51,6 +51,7 @@ import { PX_PER_UNIT } from "../desk/desk-geometry.js";
 import { wirePath, filletedPolylinePath } from "../desk/wire-path.js";
 import { BEND_RADIUS_PX } from "../model/route-config.js";
 import { holePosition } from "../model/breadboard.js";
+import { seatsWide, withSeat } from "../model/footprints.js";
 import { DeskDoc } from "../model/desk-doc.js";
 import { footprintOffsets, partDef } from "../catalog/index.js";
 import { dropRunLatches } from "../catalog/run-latches.js";
@@ -462,7 +463,11 @@ export class DeskPlacement {
     const ay = member.anchorWorld.y + shift.dy;
     const def = partDef(member.ref);
     if (def?.kind === "chip") {
-      const box = chipBox(def.package, member.chipRow);
+      const box = chipBox(
+        def.package,
+        member.chipRow,
+        seatsWide(member.params),
+      );
       return { x: ax + box.minX, y: ay + box.minY };
     }
     switch (member.form ?? memberForm(member.ref, member.params)) {
@@ -866,6 +871,16 @@ export class DeskPlacement {
         : discreteBox(m.ref, m.params?.rot, m.params);
     const seat = this.#host.partSeatAt(w, m.ref, 0, m.params);
     m.ghost.hidden = false;
+    // A 600-mil chip's ghost takes the wide seat nearest the cursor; the e/i
+    // one is the seat that has to say so in the params it lands with.
+    if (seat && m.kind === "place-chip") {
+      m.params = withSeat(
+        partDef(m.ref).package,
+        m.params,
+        seat.anchor.charAt(0),
+        seat.wide,
+      );
+    }
     if (seat) {
       const board = this.#host.doc.getBoard(seat.board);
       const pos = holePosition(board.type, seat.anchor);

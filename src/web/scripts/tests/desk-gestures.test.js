@@ -349,6 +349,71 @@ test("part drag: a narrow-seated 600-mil chip re-seats at its true width; Option
   assert.equal(t.doc.getWire(t.wire.id).from, "bb1.i9");
 });
 
+test("part drag: a 600-mil chip moves between its wide seats by the pointer's travel", () => {
+  const setup = () => {
+    resetDom();
+    const doc = new DeskDoc(null);
+    const world = { x: 0, y: 0 };
+    const { surface, controller } = makeDesk(doc, world);
+    controller.addBoardAt("pins-full", 0, 0);
+    const chip = controller.addComponentAt("HM62256", "bb1", "d5"); // cols 5–18
+    return { doc, world, surface, chip };
+  };
+  // Grabbed by the top of its body (row g) and lifted one row: rows e and i,
+  // the seat that has to say so in its params.
+  let t = setup();
+  drag(partEl(t.surface, t.chip.id), t.world, { x: 10, y: ROW.g }, { x: 10, y: ROW.g - 1 }); // prettier-ignore
+  assert.equal(t.doc.getComponent(t.chip.id).anchor, "e5");
+  assert.deepEqual(t.doc.getComponent(t.chip.id).params, { wide: true });
+  let svg = partEl(t.surface, t.chip.id).querySelector(".part-chip-svg");
+  assert.equal(svg.getAttribute("viewBox").split(" ")[3], "7.2", "drawn wide");
+  // Back down two rows from there, grabbed by its lower legs: c/g, and the
+  // marker is gone.
+  drag(partEl(t.surface, t.chip.id), t.world, { x: 10, y: ROW.e + 0.4 }, { x: 10, y: ROW.e + 2.4 }); // prettier-ignore
+  assert.equal(t.doc.getComponent(t.chip.id).anchor, "c5");
+  assert.deepEqual(t.doc.getComponent(t.chip.id).params, {});
+  // Two rows down from d/h, grabbed by its upper legs: b/f, the lowest seat.
+  t = setup();
+  drag(partEl(t.surface, t.chip.id), t.world, { x: 10, y: ROW.f }, { x: 10, y: ROW.f + 2 }); // prettier-ignore
+  assert.equal(t.doc.getComponent(t.chip.id).anchor, "b5");
+  svg = partEl(t.surface, t.chip.id).querySelector(".part-chip-svg");
+  assert.equal(svg.getAttribute("viewBox").split(" ")[3], "7.2");
+});
+
+test("part drag: a narrow-seated 600-mil chip can be lifted into e/i, keeping its anchor", () => {
+  resetDom();
+  const doc = new DeskDoc(null);
+  const world = { x: 0, y: 0 };
+  const { surface, controller } = makeDesk(doc, world);
+  controller.addBoardAt("pins-full", 0, 0);
+  const chip = controller.addComponentAt("HM62256", "bb1", "e5"); // e/f, as loaded
+  let changes = 0;
+  window.addEventListener("chiphippo:doc-changed", () => changes++);
+  // From the middle of e/f (the trench) up 1.5 rows: the middle of e/i.
+  drag(partEl(surface, chip.id), world, { x: 10, y: (ROW.e + ROW.f) / 2 }, { x: 10, y: (ROW.e + ROW.i) / 2 }); // prettier-ignore
+  assert.equal(doc.getComponent(chip.id).anchor, "e5");
+  assert.deepEqual(doc.getComponent(chip.id).params, { wide: true });
+  assert.equal(changes, 1, "a move, though the anchor is the same hole");
+});
+
+test("placement: a 600-mil chip takes the wide seat nearest the cursor", () => {
+  const place = (y) => {
+    resetDom();
+    const doc = new DeskDoc(null);
+    const world = { x: 0, y: 0 };
+    const { viewport, controller } = makeDesk(doc, world);
+    controller.addBoardAt("pins-full", 0, 0);
+    controller.armChipPlacement("HM62256");
+    placeClick(viewport, world, { x: 20, y });
+    const [c] = doc.components;
+    return `${c.anchor}${c.params.wide ? "+" : ""}`;
+  };
+  assert.equal(place((ROW.d + ROW.h) / 2), "d14");
+  assert.equal(place((ROW.e + ROW.i) / 2), "e14+");
+  assert.equal(place((ROW.c + ROW.g) / 2), "c14");
+  assert.equal(place((ROW.b + ROW.f) / 2), "b14");
+});
+
 test("part drag: a sub-threshold press selects the chip but does not move it", () => {
   resetDom();
   const doc = new DeskDoc(null);

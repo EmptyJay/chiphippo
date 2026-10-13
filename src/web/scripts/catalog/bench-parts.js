@@ -179,9 +179,13 @@ export const RELAY_DEF = Object.freeze({
     "of its rating and lets go below 10 % — a little late with a diode " +
     "across it, which keeps the current going — and switched off with " +
     "nowhere for its current to go it kicks. The logic " +
-    "engine closes COM–NO while one coil leg is HIGH and the other LOW.",
+    "engine closes COM–NO while one coil leg is HIGH and the other LOW. " +
+    "Press R while placing, or with it selected, to turn it end for end.",
   group: "Relays",
   footprint: Object.freeze({ offsets: Object.freeze([0, 1, 2, 3, 4]) }),
+  // Turns end for end in place (params.rot 180), as a transistor does: the
+  // same five holes, the pin order reversed.
+  reversible: true,
   pins: [
     // COIL+ and COIL− as the request and the sheet's symbol name them —
     // though the coil has no polarity, and either way round works.
@@ -215,7 +219,11 @@ export const RELAY_DEF = Object.freeze({
     },
   ],
   normalizeParams(raw) {
-    return relayCoilVolts(raw) === 12 ? { coilVolts: 12 } : {};
+    return {
+      ...(relayCoilVolts(raw) === 12 ? { coilVolts: 12 } : {}),
+      // Stored only when set, so an unturned relay round-trips unchanged.
+      ...(raw?.rot === 180 ? { rot: 180 } : {}),
+    };
   },
   internalBridges() {
     return [];

@@ -113,6 +113,22 @@ const COMMON_TYPE = "de.neemann.digital.core.io.CommonConnectionType";
 
 /** The tunnel rotation that points its flag AWAY from a pin on each side. */
 const TUNNEL_ROT = { left: 2, right: 0, top: 1, bottom: 3 };
+/**
+ * The rotation that points a pull AWAY from its pin on each side (Digital
+ * turns counter-clockwise): a PullUp's arrow is drawn up, a PullDown's bar
+ * down. A pull is two grid units long and a DIP's pins are two apart, so one
+ * left pointing along the pins lands on the next pin's lead — 2A's tie-high
+ * on 1Y, 4B's on VCC.
+ */
+const PULL_ROT = {
+  PullUp: { top: 0, left: 1, bottom: 2, right: 3 },
+  PullDown: { bottom: 0, right: 1, top: 2, left: 3 },
+};
+/** Which way a pull points, by its kind and rotation. */
+const PULL_DIR = {
+  PullUp: ["top", "left", "bottom", "right"],
+  PullDown: ["bottom", "right", "top", "left"],
+};
 const OUT = {
   left: { dx: -1, dy: 0 },
   right: { dx: 1, dy: 0 },
@@ -345,6 +361,18 @@ export function exportDigital(doc, desktop) {
     if (floating.has(name)) addReport(report, "changed", "cmosFloating", part);
   }
 
+  // A pull tying an unconnected pin is part of its part's drawing, pointing
+  // away from it — so the layout leaves room for it.
+  for (const pin of nearPins) {
+    const kind = pin.up ? "PullUp" : "PullDown";
+    const r = PULL_ROT[kind][pin.side];
+    drawings
+      .get(pin.partId)
+      .elements.push(
+        element(kind, r ? [["rotation", rot(r)]] : [], pin.x, pin.y),
+      );
+  }
+
   // ── Supplies and pulls: a column of their own at the left. ──
   const supplies = [];
   for (const [name, pol] of [...polarity].sort()) {
@@ -411,18 +439,6 @@ export function exportDigital(doc, desktop) {
         ),
       );
     }
-  }
-  for (const pin of nearPins) {
-    const p = at.get(pin.partId);
-    const e = extents.get(pin.partId);
-    elements.push(
-      element(
-        pin.up ? "PullUp" : "PullDown",
-        [],
-        pin.x + p.x - e.minX,
-        pin.y + p.y - e.minY,
-      ),
-    );
   }
 
   const base = safeFileBase(desktop.name);
@@ -568,7 +584,7 @@ function drawPart(part, ctx) {
       const place = (port, x, y, side, off) => {
         const name = ctx.nameOf(port?.net ?? null);
         if (name) d.pins.push({ x, y, side, net: name });
-        else ctx.nearPins.push({ partId: part.id, x, y, up: off });
+        else ctx.nearPins.push({ partId: part.id, x, y, side, up: off });
       };
       order.forEach((name, i) => {
         const top = i < 4;
@@ -686,7 +702,7 @@ function ledDrawing(part, x, y, d, { anodePin, cathodePin }, label, ctx) {
   const leg = (pin, dy, side, off) => {
     const net = netOf(pin);
     if (net) d.pins.push({ x, y: y + dy, side, net });
-    else ctx.nearPins.push({ partId: part.id, x, y: y + dy, up: off });
+    else ctx.nearPins.push({ partId: part.id, x, y: y + dy, side, up: off });
   };
   leg(anodePin, 0, "top", false);
   leg(cathodePin, 4 * SIZE, "bottom", true);
@@ -729,6 +745,7 @@ function drawChip(part, ctx) {
       partId: part.id,
       x: pos.x,
       y: pos.y,
+      side: pos.side,
       up: port.role !== "gnd",
     });
   }
@@ -835,11 +852,19 @@ function bodySize(el) {
     case "Button":
     case "In":
       return { minX: -4 * SIZE, maxX: 0, minY: -SIZE, maxY: SIZE };
-    case "VDD":
     case "PullUp":
+    case "PullDown": {
+      const r = el.attrs.find(([key]) => key === "rotation")?.[1].rotation;
+      const dir = PULL_DIR[el.name][r ?? 0];
+      const far = 2 * SIZE;
+      if (dir === "left") return { minX: -far, maxX: 0, minY: -SIZE, maxY: SIZE }; // prettier-ignore
+      if (dir === "right") return { minX: 0, maxX: far, minY: -SIZE, maxY: SIZE }; // prettier-ignore
+      if (dir === "top") return { minX: -SIZE, maxX: SIZE, minY: -far, maxY: 0 }; // prettier-ignore
+      return { minX: -SIZE, maxX: SIZE, minY: 0, maxY: far };
+    }
+    case "VDD":
       return { minX: -SIZE, maxX: SIZE, minY: -2 * SIZE, maxY: 0 };
     case "Ground":
-    case "PullDown":
       return { minX: -SIZE, maxX: SIZE, minY: 0, maxY: 2 * SIZE };
     case "Text":
       return { minX: 0, maxX: 12 * SIZE, minY: -SIZE, maxY: SIZE };

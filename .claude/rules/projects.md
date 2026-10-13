@@ -64,6 +64,14 @@ paths:
   **editable when stopped** for a ROM (Save writes its file) and a **read-only live
   viewer** for SRAM and any running chip (it mirrors the engine-owned image, never writes
   it). Intel HEX ⇄ bytes is the pure `model/hex-format.js`.
+- **Unsaved edits show on the desk** (2026-10-12): the window reports each change of its
+  `dirty` to the host (`to-host` `{kind: "edits", unsaved}`), and main reports a closed
+  window (`{kind: "closed"}` — its edits went with it); `MemoryBridge` hands both to
+  `DeskController.setMemoryUnsaved`, which keeps `#unsavedMemory` (cleared by
+  `loadDocument`, re-applied by `#mountPart`) and lights the shared triangle
+  (`part-chip--unsaved`) with `properties.warning.unsaved` — ahead of "unprogrammed" on
+  the desk, beside it in the Properties card. Not a document change: the edits live only
+  in the window, and the circuit reads the file.
 - The renderer-side **`components/memory-bridge.js`** answers a window's `ready` with its
   chip context (kind + GUID + display path + the image's source file and whether it has
   been edited, or the live bytes while running), runs the programmer + Save **through the
@@ -104,14 +112,44 @@ Code: `app/store/project-store.js` + `project-images.js` + `project-migrate.js` 
   project swap) runs through `#oneSwapAtATime`; a second click during a hold queues, so
   the write lands in its own desktop and the last click wins. Never call a public swap
   from inside one (deadlock): `#addExample` calls `#selectTab`. `#confirmLeaveProject`
-  awaits the queue first, so a quit's question and save see the kept edits. A write
-  coming back after its desk has gone flags nothing (`keepRunEdits`' `stillHere`). A
-  PROJECT swap (`project: true`) keeps no edits — that project was saved or discarded.
-  While a swap waits the strip shows `project-tabs--busy`; tab clicks made before a
-  switch gets its turn are ONE switch to the last tab clicked (`#selecting`/`#selectTo`);
-  a Run started during the wait is stopped too; a keep from an EARLIER Stop still
-  writing is held by the next swap (the bridge's `#keeping`); and a keep whose desk has
-  gone by the time its write lands puts the file back (`#save` reads it first).
+  awaits the queue first, then every ROM write still under way (`chiphippo:writes-pending`
+  `{hold}`, the same `HOLD_MS` wait — a plain Stop's keep, an inspector Save), so a
+  quit's question and save see the kept edits. A PROJECT swap (`project: true`) keeps no
+  edits — that project was saved or discarded. While a swap waits the strip shows
+  `project-tabs--busy`; tab clicks made before a switch gets its turn are ONE switch to
+  the last tab clicked (`#selecting` `{to, turn}`) — but only while that switch is the
+  LAST thing queued (`#lastSwap`): a click after a queued add is its own switch, after
+  it. A Run started during the wait is stopped too; a keep from an EARLIER Stop still
+  writing is held by the next swap (the bridge's `#keeping`).
+- **Every ROM write lands in the desktop it was made on** (2026-10-12). `MemoryBridge
+  #landed` runs each one (Load/Program, the inspector's Save, `keepRunEdits`), tracked in
+  `#writing` for `desk-leaving`/`writes-pending` to hold, stamped (`#stamp`, taken WITH
+  the chip — Program's before its picker) with `ProjectWorkspace.deskWhere()`
+  (`{project: #projectSerial, tab}`) and the file's GUID — only the chip naming that file
+  is flagged (`setMemoryProgrammed`'s `{guid}`, `flagRomIn`'s), never one placed since
+  under a reused id. A write that throws answers as a failed one; a
+  flag that throws is logged. EVERY landing goes to `markRomKept(where, …)` (the bridge's
+  `markKept`; its `#epoch` is only the fallback with no workspace), because a swap
+  stashes the desk it leaves and THEN awaits the aux windows — main answers in order, so
+  a write past `HOLD_MS` lands in exactly that gap. `markRomKept` flags BOTH copies: on
+  the desk when that desktop is active (`setMemoryProgrammed`, its own undo step), and
+  in the project's copy — plus, off the desk, that desktop's undo history's present
+  entry AND redo future (`HistoryStore.syncForward`, no step added or dropped; the past
+  is left), or an undo-then-redo — or a redo already waiting — drops the flag. It
+  answers whether a chip was flagged — on the desk, the DESK's answer (the project's
+  copy may be older: a chip deleted since) — false for another PROJECT open since, a
+  deleted desktop or a gone chip; only true calls `onImagesChanged` (no stray •) and
+  only true makes `keepRunEdits` "kept". `#duplicateTab` re-reads its source after
+  main's copy returns and carries any flag landed meanwhile (`withRomFlagsOf`: only to
+  chips whose GUID is still the one SENT — not one placed since under a reused id — the
+  copy's own GUIDs kept). An inspector's Save is ANSWERED (`#savedReply`): `saved`
+  `{source, edited}` updates its binding line (never a whole context, which would reload
+  its bytes over newer typing), `save-failed` hands its edits back as unsaved. Program
+  re-checks "running" after its picker. `#confirmLeaveProject` loops (≤3) until both
+  the swap queue and the writes are quiet.
+  The flag's rule is ONE function, `model/rom-binding.js` `programmedPatch`
+  (`flagRomIn` in the workspace applies it to a document). `#awaitHolds` counts its
+  waits (`#waiting`), so overlapping ones keep the strip busy until the last ends.
 - **A tab is a DOCUMENT, not a second desk.** There is exactly one `DeskView` /
   `DeskController` / `SimController` / palette / guide / analyzer; switching desktops
   SWAPS THE DOCUMENT in place through `DeskController.loadDocument` — the same
@@ -166,9 +204,13 @@ Code: `app/store/project-store.js` + `project-images.js` + `project-migrate.js` 
   - **A slot that THROWS on a read is never deleted** (`app/boot-slot.js`
     `keepUnreadSlot`, 2026-10-11): whichever read meets the I/O error first — the
     recovery PEEK, the recovery read or the untitled project's read — the slot is moved
-    aside (`setAsideDefaultProject`, `default.chiphippo.unread-<ts>`) or, if even that
-    fails, HELD for the session (`holdDefaultProject`: no write, no remove, a new project
-    written nowhere), and a startup note names where it is. A DAMAGED slot (bad JSON)
+    aside (`setAsideDefaultProject`, `default.unread-<ts>.chiphippo` — still a project
+    file, for File ▸ Open) or, if even that fails, HELD for the session
+    (`holdDefaultProject`: no write, no remove, a new project written nowhere; both
+    `project:save` and `project:recovery:write` answer `{ok:false, code:"slot-held"}`,
+    quiet for a background stash), and a startup note names where it is — as FACTS
+    `{key, path}` (`workspace.slotAside`/`slotLeft`), worded by the renderer's `#warn`
+    under `workspace.slotUnreadTitle`, apart from a project's own string warnings. A DAMAGED slot (bad JSON)
     reads as null and is quarantined by `io.readJSON`, as before.
   - **A restore is not a question.** `recoveryBoot` restores the stash outright and the
     renderer says so (`workspace.recovered*` — main hands over the FACTS

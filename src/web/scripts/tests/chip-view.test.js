@@ -136,6 +136,13 @@ test("ChipView redraws at the new width when a narrow-seated 600-mil chip moves"
   // A flip redraws at the width it is seated at, not the one it started with.
   view.updateParams({ rot: 180 });
   assert.equal(height(), "7.2");
+  // Row e with the e/i marker is a wide seat too; dropped, the narrow one.
+  view.updatePlacement(board, "e5", { rot: 180, wide: true });
+  assert.equal(height(), "7.2");
+  view.updatePlacement(board, "e5", { rot: 180 });
+  assert.equal(height(), "4.2");
+  view.updatePlacement(board, "b5");
+  assert.equal(height(), "7.2");
 });
 
 test("buildChipSvg: fault symbols stay OUTSIDE the 180° flip group", () => {

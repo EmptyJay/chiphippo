@@ -42,6 +42,8 @@ test("an install that did not happen says so, replacing the Restart offer", () =
   push("preparing");
   assert.equal(shown.at(-1).title, "Preparing the update");
   assert.match(shown.at(-1).message, /asks about unsaved work first/);
+  assert.equal(shown.at(-1).sticky, true, "the wait can run minutes");
+  assert.equal(shown.at(-1).actionLabel, "Restart", "it took the offer's place"); // prettier-ignore
   push("install-failed");
   const toast = shown.at(-1);
   assert.equal(toast.variant, "warning");
@@ -51,4 +53,10 @@ test("an install that did not happen says so, replacing the Restart offer", () =
   assert.equal(toast.sticky, true);
   assert.equal(toast.actionLabel, "Restart", "and the offer stands");
   assert.deepEqual(dismissed, ["updater", "updater", "updater"]);
+  // macOS failed the download itself: Restart cannot help — the offer is
+  // to fetch it again.
+  push("install-failed", { blocked: true });
+  assert.match(shown.at(-1).message, /could not get the update ready/);
+  assert.equal(shown.at(-1).actionLabel, "Check for updates");
+  assert.equal(shown.at(-1).sticky, true);
 });

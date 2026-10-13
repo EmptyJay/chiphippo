@@ -89,29 +89,43 @@ export class UpdaterMonitor {
       });
     });
 
+    // Restart pressed before the update was ready to install (macOS, while
+    // Squirrel takes it): nothing happens for a while, so say why — the
+    // question about unsaved work, and the restart, come when it is. It takes
+    // the "ready" toast's place, so it keeps that toast's terms: sticky (the
+    // wait can run minutes) and still offering Restart — pressing it again
+    // joins the wait, and after a Cancel on the question it is the offer.
+    window.addEventListener("chiphippo:updater-preparing", () => {
+      this.#show({
+        variant: "info",
+        sticky: true,
+        title: t("updater.preparing"),
+        message: t("updater.preparingMessage"),
+        actionLabel: t("updater.restart"),
+        onAction: () => window.chiphippo?.updater?.install?.(),
+      });
+    });
+
     // A Restart that did not restart: said, because the window simply staying
     // put explains nothing — and the offer stays, Restart and all, since the
     // update is still downloaded (a quit installs it only if Squirrel has it,
     // so that is not promised).
-    // Restart pressed before the update was ready to install (macOS, while
-    // Squirrel takes it): nothing happens for a while, so say why — the
-    // question about unsaved work, and the restart, come when it is.
-    window.addEventListener("chiphippo:updater-preparing", () => {
-      this.#show({
-        variant: "info",
-        title: t("updater.preparing"),
-        message: t("updater.preparingMessage"),
-      });
-    });
-
-    window.addEventListener("chiphippo:updater-install-failed", () => {
+    // `blocked`: macOS's installer has failed this download (refused it, or
+    // never got it ready) — Restart cannot help until it is fetched again, so
+    // the offer is Check for Updates, which does that.
+    window.addEventListener("chiphippo:updater-install-failed", (e) => {
+      const blocked = e.detail?.blocked === true;
       this.#show({
         variant: "warning",
         sticky: true,
         title: t("updater.installFailed"),
-        message: t("updater.installFailedMessage"),
-        actionLabel: t("updater.restart"),
-        onAction: () => window.chiphippo?.updater?.install?.(),
+        message: blocked
+          ? t("updater.installBlockedMessage")
+          : t("updater.installFailedMessage"),
+        actionLabel: blocked ? t("settings.about.check") : t("updater.restart"),
+        onAction: blocked
+          ? () => window.chiphippo?.updater?.check?.()
+          : () => window.chiphippo?.updater?.install?.(),
       });
     });
 

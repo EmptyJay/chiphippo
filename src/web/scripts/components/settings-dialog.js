@@ -528,6 +528,9 @@ function buildAboutPanel(settings, emitPatch) {
     restartBtn.hidden = false;
   };
   const onError = () => say(t("settings.about.error"));
+  // Restart pressed while macOS is still taking the download (or Check
+  // pressed during that wait, which answers this rather than checking).
+  const onPreparing = () => say(t("settings.about.preparing"));
 
   const LISTENERS = [
     ["chiphippo:updater-checking", onChecking],
@@ -535,6 +538,7 @@ function buildAboutPanel(settings, emitPatch) {
     ["chiphippo:updater-not-available", onNotAvailable],
     ["chiphippo:updater-downloaded", onDownloaded],
     ["chiphippo:updater-error", onError],
+    ["chiphippo:updater-preparing", onPreparing],
   ];
   for (const [event, fn] of LISTENERS) window.addEventListener(event, fn);
 

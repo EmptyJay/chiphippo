@@ -51,6 +51,15 @@ export class MemoryBridge {
   #bridge;
   #notifications;
   #onImagesChanged;
+  #whereNow;
+  #markKept;
+  // Which document is on the desk: counts `desk-loaded`. With no `markKept`
+  // to flag a chip where its write began, a write that comes back under
+  // another document flags nothing (`#flag`).
+  #epoch = 0;
+  // ROM writes still under way — a desk swap and the leave question wait for
+  // them (`desk-leaving` / `writes-pending`, their `hold`).
+  #writing = new Set();
   // Chips whose inspector window has announced itself this session. A window
   // closed since is harmless to address: main drops a message with nowhere
   // to go.
@@ -68,6 +77,11 @@ export class MemoryBridge {
    *   and `storage.source` exactly as they were, so a signature comparison
    *   cannot see it, and the bytes have to travel in the project file. See
    *   `ProjectWorkspace.markImagesChanged`.
+   * @param {() => object} [opts.whereNow] - where the desk's document belongs
+   *   (`ProjectWorkspace.deskWhere`), taken as a write starts
+   * @param {(where: object, compId: string, binding: object) => boolean} [opts.markKept]
+   *   - a write landed: flag the chip in the desktop it began on, wherever
+   *   that is now (`ProjectWorkspace.markRomKept`); whether a chip was flagged
    */
   constructor({
     deskDoc,
@@ -76,6 +90,8 @@ export class MemoryBridge {
     bridge,
     notifications,
     onImagesChanged,
+    whereNow,
+    markKept,
   }) {
     this.#doc = deskDoc;
     this.#sim = sim;
@@ -83,11 +99,75 @@ export class MemoryBridge {
     this.#bridge = bridge;
     this.#notifications = notifications;
     this.#onImagesChanged = onImagesChanged;
+    this.#whereNow = whereNow;
+    this.#markKept = markKept;
     window.addEventListener(
       "chiphippo:memory-host-inbound",
       this.#onHostInbound,
     );
     window.addEventListener("chiphippo:mem-state", this.#onMemState);
+    window.addEventListener("chiphippo:desk-loaded", () => (this.#epoch += 1));
+    const holdWrites = (e) => {
+      for (const write of this.#writing) e.detail?.hold?.(write);
+    };
+    window.addEventListener("chiphippo:desk-leaving", holdWrites);
+    window.addEventListener("chiphippo:writes-pending", holdWrites);
+  }
+
+  /** Where a write of file `guid` begins: the desk as it stands (`#flag`
+      reads it). Taken when the chip is, before any await between them. The
+      guid goes with it, so only the chip that names THAT file is flagged —
+      not one placed since under a reused id (an undo, then a new ROM). */
+  #stamp(guid) {
+    return { epoch: this.#epoch, where: this.#whereNow?.() ?? null, guid };
+  }
+
+  /**
+   * Run one ROM write — `write()` resolves with main's answer — and flag its
+   * chip once it has landed, in the desktop the write began on (`#flag`), so
+   * the file and the chip that names it never disagree. Tracked while under
+   * way, for whoever has to wait for it. A write that THROWS answers as one
+   * that failed; a flag that throws is logged, not reported as the write
+   * failing (the bytes are written). Main's answer (or `{ok: true}`), with
+   * `flagged`: whether a chip now names the bytes.
+   */
+  async #landed(compId, binding, write, stamp) {
+    const pending = (async () => {
+      let res;
+      try {
+        res = await write();
+      } catch (err) {
+        res = { ok: false, error: err?.message ?? String(err) };
+      }
+      if (res?.ok === false) return res;
+      let flagged = false;
+      try {
+        // The bytes changed in the project the write began in — and only
+        // there: one opened since must not be marked edited by another's file.
+        flagged = this.#flag(compId, binding, stamp);
+        if (flagged) this.#onImagesChanged?.();
+      } catch (err) {
+        console.error("[renderer] flagging a written ROM failed:", err);
+      }
+      return { ...(res ?? { ok: true }), flagged };
+    })();
+    this.#writing.add(pending);
+    try {
+      return await pending;
+    } finally {
+      this.#writing.delete(pending);
+    }
+  }
+
+  /** Flag a written ROM's chip where its write began (`markKept`) — or, with
+      no workspace to ask, on the desk if it still holds that document.
+      Whether a chip was flagged. */
+  #flag(compId, binding, { epoch, where, guid }) {
+    if (this.#markKept) {
+      return this.#markKept(where, compId, binding, guid) === true;
+    }
+    if (this.#epoch !== epoch) return false;
+    return this.#controller?.setMemoryProgrammed(compId, true, binding, { guid }) === true; // prettier-ignore
   }
 
   /** Open (or focus) the inspector window for a memory chip (context menu). */
@@ -115,8 +195,18 @@ export class MemoryBridge {
     }
     const info = this.#romInfo(compId);
     if (!info) return;
+    const stamp = this.#stamp(info.guid); // with the chip, before the picker's wait
     const picked = await this.#bridge?.mem?.pickImage();
     if (!picked) return; // cancelled
+    // Asked again: a run can start while the picker is up (a menu shortcut),
+    // and its ROM must not be written out from under it.
+    if (this.#sim?.running) {
+      return this.#warn(
+        "danger",
+        t("memory.programRunning"),
+        t("memory.liveMessage", { chip: this.#refName(compId) }),
+      );
+    }
     if (picked.ok === false) {
       return this.#warn("danger", t("memory.importFailed"), picked.error);
     }
@@ -149,21 +239,18 @@ export class MemoryBridge {
           : t("memory.sizeLong", sizes),
       );
     }
-    const res = await this.#bridge?.mem?.program(
-      info.guid,
-      bytes,
-      info.byteLength,
+    // The file is recorded on the chip, so the inspector and the Properties
+    // card can both say which image is loaded — a `<guid>.bin` under userData
+    // is a cache path and answers nothing.
+    const res = await this.#landed(
+      compId,
+      { source: picked.path ?? null },
+      () => this.#bridge?.mem?.program(info.guid, bytes, info.byteLength),
+      stamp,
     );
     if (res?.ok === false) {
       return this.#warn("danger", t("memory.programFailed"), res.error);
     }
-    // The file is recorded on the chip, so the inspector and the Properties
-    // card can both say which image is loaded — a `<guid>.bin` under userData
-    // is a cache path and answers nothing.
-    this.#controller?.setMemoryProgrammed(compId, true, {
-      source: picked.path ?? null,
-    });
-    this.#onImagesChanged?.();
     this.#sendContext(compId); // the window reloads from the programmed file
   }
 
@@ -172,10 +259,37 @@ export class MemoryBridge {
   #onHostInbound = (e) => {
     const { compId, msg } = e.detail ?? {};
     if (!compId || !msg) return;
-    if (msg.kind === "ready") this.#onReady(compId);
-    else if (msg.kind === "program") this.program(compId);
-    else if (msg.kind === "save") this.#save(compId, msg.bytes);
+    const failed = (err) =>
+      console.error(`[renderer] memory ${msg.kind} failed:`, err);
+    if (msg.kind === "ready") this.#onReady(compId).catch(failed);
+    else if (msg.kind === "program") this.program(compId).catch(failed);
+    else if (msg.kind === "edits") {
+      this.#controller?.setMemoryUnsaved?.(compId, msg.unsaved === true);
+    } else if (msg.kind === "closed") {
+      this.#controller?.setMemoryUnsaved?.(compId, false);
+    } else if (msg.kind === "save") {
+      this.#save(compId, msg.bytes)
+        .then((res) => this.#savedReply(compId, res))
+        .catch(failed);
+    }
   };
+
+  /** Answer an inspector's Save. It has already marked its edits saved, so a
+      failure hands them back as unsaved (`save-failed`); a success tells it
+      the chip's binding now (`saved` — the line says "(edited)"), and only
+      that: a whole context would reload its bytes over any typed since. */
+  #savedReply(compId, res) {
+    if (res.ok === false) {
+      this.#relay(compId, { kind: "save-failed" });
+      return;
+    }
+    const storage = this.#doc.getComponent(compId)?.params?.storage;
+    this.#relay(compId, {
+      kind: "saved",
+      source: storage?.source ?? null,
+      edited: storage?.edited === true,
+    });
+  }
 
   /** A window is up: make sure a ROM's file exists (warn on a lost one), then
       hand it its context. */
@@ -193,20 +307,19 @@ export class MemoryBridge {
    * the Stop before this write landed). Whether the bytes were kept.
    * @param {string} compId
    * @param {Uint8Array} bytes - the chip's whole image, packed as its file is
-   * @param {{stillHere?: () => boolean}} [opts] - whether the desk the bytes
-   *   were edited on is still the one on screen when the write comes back:
-   *   if not, nothing on the desk there now is flagged (and it is not kept)
    */
-  async keepRunEdits(compId, bytes, { stillHere = () => true } = {}) {
-    // (Always a `stillHere`: a keep is the one write that can outlive its desk.)
-    const kept = await this.#save(compId, bytes, { stillHere });
-    if (kept && this.#windows.has(compId)) this.#sendContext(compId);
-    return kept;
+  async keepRunEdits(compId, bytes) {
+    const res = await this.#save(compId, bytes);
+    if (res.ok === false) return false;
+    if (this.#windows.has(compId)) this.#sendContext(compId);
+    // Written, but no chip names the file any more (its desktop or project
+    // gone since): not "kept" — nothing open will ever read those bytes.
+    return res.flagged === true;
   }
 
   /** Persist inspector hand-edits to a ROM's file (Save) + flag it programmed.
-      Whether they were written. */
-  async #save(compId, bytes, { stillHere = null } = {}) {
+      `#landed`'s answer, or `{ok: false}` when it was refused. */
+  async #save(compId, bytes) {
     if (this.#sim?.running) {
       // The requesting window is told when a run starts and stops, but a Save
       // can cross that message in flight — so this, not the window's own
@@ -217,31 +330,21 @@ export class MemoryBridge {
         t("memory.saveRunning"),
         t("memory.liveMessage", { chip: this.#refName(compId) }),
       );
-      return false;
+      return { ok: false };
     }
     const info = this.#romInfo(compId);
-    if (!info) return false;
-    // A write that may outlive its desk (`stillHere`, the CPU monitor's keep)
-    // takes the file's bytes first, to put back if it does: written without
-    // the chip flagged, the file and the document would disagree — the next
-    // run on that desktop reading bytes its chip does not say it holds.
-    const was = stillHere ? await this.#currentBytes(info) : null;
-    const res = await this.#bridge?.mem?.write(info.guid, bytes);
-    if (res?.ok === false) {
-      this.#warn("danger", t("memory.saveFailed"), res.error);
-      return false;
-    }
-    if (stillHere && !stillHere()) {
-      console.warn(`[renderer] ${compId}'s kept bytes came back after its desk had gone; put back`); // prettier-ignore
-      if (was?.length) await this.#bridge?.mem?.write(info.guid, Uint8Array.from(was)); // prettier-ignore
-      return false;
-    }
+    if (!info) return { ok: false };
     // The source file KEEPS its place and is marked instead: it is still where
     // these bytes came from, which is what the label is for — they have simply
     // moved on from it since.
-    this.#controller?.setMemoryProgrammed(compId, true, { edited: true });
-    this.#onImagesChanged?.();
-    return true;
+    const res = await this.#landed(
+      compId,
+      { edited: true },
+      () => this.#bridge?.mem?.write(info.guid, bytes),
+      this.#stamp(info.guid),
+    );
+    if (res.ok === false) this.#warn("danger", t("memory.saveFailed"), res.error); // prettier-ignore
+    return res;
   }
 
   /** Create a ROM's backing file if missing; a programmed chip losing its file
@@ -280,8 +383,13 @@ export class MemoryBridge {
       running,
     };
     if (!volatile && guid) {
-      const p = await this.#bridge?.mem?.path(guid);
-      if (p?.ok) ctx.path = p.path;
+      // Fire-and-forget everywhere it is called, so it may not reject.
+      try {
+        const p = await this.#bridge?.mem?.path(guid);
+        if (p?.ok) ctx.path = p.path;
+      } catch (err) {
+        console.error("[renderer] mem:path failed:", err);
+      }
     }
     // While running the host owns the image (hand over the live bytes). Stopped,
     // a ROM window loads its file itself; only a VOLATILE chip needs its final

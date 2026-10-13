@@ -67,7 +67,7 @@ keeps its new contents the next time you open the document or press Run.
 The chip also **remembers which file you loaded**. The Properties dialog
 shows it as **Image file**, so you can tell at a glance whether a ROM holds
 the monitor image or last week's experiment. If you go on to edit the bytes
-by hand in the inspector, the file is still shown — marked *(edited)*, since
+by hand in the inspector, the file is still shown — marked _(edited)_, since
 it is where the data came from but no longer what the chip holds.
 
 Programming is only available while editing is unlocked (i.e. the
@@ -76,10 +76,10 @@ simulation is stopped) — see [Running a Simulation](simulation.md).
 ## The memory inspector
 
 Every memory chip — SRAM or ROM alike — has a floating **inspector**
-window: right-click it on the desk, choose **Properties…**, then
-**Inspect memory…**. It's a hex/ASCII grid, one row per 16 bytes, with a
-toolbar for **Go to** (jump to an address), **Fill** (write a byte value
-across a start/end range), **Save**, and Import/Export.
+window: right-click it on the desk and choose **Inspect Memory**. It's a
+hex/ASCII grid, one row per 16 bytes, with a toolbar for **Go to** (jump to
+an address), **Fill** (write a byte value across a start/end range),
+**Save**, and Import/Export.
 
 ![The memory inspector showing a ROM's contents](images/memory-inspector.png)
 
@@ -96,7 +96,10 @@ of chip it is:
   **Enter** stops where you are, writing a single digit as that value;
   **Escape**, or clicking away with only one digit typed, abandons the byte.
   **Save** writes your edits back to the chip's file and flags it
-  **programmed**, exactly like using the external programmer.
+  **programmed**, exactly like using the external programmer. Until you
+  save, the chip on the desk wears a warning triangle that says **Edited, not
+  saved**: the circuit reads the chip's file, which doesn't have your edits
+  yet. Closing the inspector without saving discards them.
 - **Stopped, SRAM** — shows the chip's last contents from before it was
   stopped (or noise, if it's never been run) as a read-only snapshot; there's
   nothing to save, since SRAM has no file.

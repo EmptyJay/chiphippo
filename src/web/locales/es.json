@@ -298,6 +298,7 @@
       "availableVersion": "La versión {version} está disponible — descargando en segundo plano…",
       "ready": "La actualización está lista para instalarse.",
       "readyVersion": "La versión {version} está lista para instalarse.",
+      "preparing": "Preparando la actualización: Chip Hippo se reiniciará en cuanto esté lista.",
       "upToDate": "Estás usando la última versión de Chip Hippo.",
       "storeBuild": "Las actualizaciones se entregan a través de la App Store.",
       "devBuild": "Las actualizaciones solo están disponibles en versiones instaladas.",
@@ -1224,7 +1225,8 @@
       "deleteSignal": "Eliminar la señal",
       "openChipDesigner": "Abrir en el Diseñador de chips",
       "breakOnSettled": "Interrumpir al estabilizarse",
-      "openCpuMonitor": "Abrir el monitor de CPU"
+      "openCpuMonitor": "Abrir el monitor de CPU",
+      "inspectMemory": "Inspeccionar la memoria"
     },
     "remove": {
       "confirm": "Quitar",
@@ -1302,6 +1304,9 @@
     "failOpen": "No se pudo abrir el proyecto",
     "failSave": "No se pudo guardar el proyecto",
     "slotHeld": "No se pudo leer el proyecto sin guardar de la última sesión, así que se conserva donde se guardaría este. Usa Guardar como para darle a este proyecto un archivo propio.",
+    "slotUnreadTitle": "No se pudo leer el trabajo de la última sesión",
+    "slotAside": "No se pudo leer el proyecto conservado de la última sesión. Se ha movido, sin cambios, a {path}, donde Archivo ▸ Abrir puede alcanzarlo.",
+    "slotLeft": "No se pudo leer ni mover el proyecto conservado de la última sesión, así que se deja en {path} para que el próximo inicio lo intente de nuevo. Hasta entonces, un proyecto sin archivo propio solo se puede guardar con Guardar como.",
     "failClose": "No se pudieron comprobar los cambios sin guardar: guarda tu trabajo antes de salir",
     "failLocation": "No se pudo elegir una ubicación",
     "failDuplicate": "No se pudo duplicar el escritorio",
@@ -1340,6 +1345,7 @@
       "unmapped": "{format} no tiene nada que colocar en su lugar",
       "clockConnector": "pasa a ser un conector CLOCK IN: en una placa ahí va un oscilador",
       "genericFootprint": "recibe una huella de tira de pines: elige la de la pieza real",
+      "pushButtonFootprint": "recibe la huella de un pulsador de 6 mm, solo por su tamaño: elige la de la pieza real",
       "resistorMerged": "pasa a ser un cable: un simulador lógico no tiene resistencias",
       "momentary": "pasa a ser un interruptor: Digital no tiene contactos momentáneos",
       "unpowered": "recibe alimentación en Digital, que no puede simular un chip sin alimentar",
@@ -1488,6 +1494,7 @@
     "checkFailed": "Falló la búsqueda de actualizaciones",
     "installFailed": "Actualización no instalada",
     "installFailedMessage": "No se ha podido instalar la actualización ahora, así que Chip Hippo sigue abierto en esta versión. Pulsa Reiniciar para volver a intentarlo.",
+    "installBlockedMessage": "macOS no pudo preparar la actualización para instalarla, así que Chip Hippo sigue abierto en esta versión. Busca actualizaciones para descargarla de nuevo, o consíguela en chiphippo.com.",
     "preparing": "Preparando la actualización",
     "preparingMessage": "Chip Hippo se reiniciará con la nueva versión en cuanto esté lista; antes preguntará por el trabajo sin guardar. Mientras tanto, puedes seguir trabajando."
   },
@@ -1653,7 +1660,6 @@
       "sine": "Senoidal"
     },
     "action": {
-      "inspectMemory": "Inspeccionar la memoria…",
       "programMemory": "Cargar una imagen… (programar)",
       "manageConnections": "Gestionar conexiones…"
     },
@@ -1664,6 +1670,7 @@
       "reversed": "Alimentación invertida — VCC y GND están intercambiados.",
       "damaged": "Dañado — {volts} V superan los {rating} de esta pieza y soltaron el humo. Al detener la simulación se restaura.",
       "unprogrammed": "Sin programar — no hay ninguna imagen cargada, así que este chip lee ruido aleatorio.",
+      "unsaved": "Editado, sin guardar — el inspector de memoria tiene cambios que el archivo de este chip todavía no tiene. Guarda en el inspector para conservarlos.",
       "timing": "Temporización no reconocida: {problems}. Sus salidas quedan en reposo hasta que se cablee como indica su hoja de datos.",
       "heldOn": "Mantiene ENCENDIDO: su puerta no tiene nivel, y la carga que le queda mantiene el canal conduciendo. Una puerta real pierde esa carga, así que fíjala a un nivel definido con una resistencia.",
       "heldOff": "Mantiene APAGADO: su puerta no tiene nivel, así que sigue como se excitó por última vez (apagado si su puerta aún no se ha excitado). Una puerta real deriva, así que fíjala a un nivel definido con una resistencia.",

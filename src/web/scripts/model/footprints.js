@@ -34,17 +34,22 @@
 // rows the pins take (`dipRows`). A 300-mil part (0.3-in row spacing — every
 // logic DIP up to DIP-20, and the DIP switch banks) seats in rows e and f, the
 // 3 pitches straight across the trench. A 600-mil part (DIP-24…40: the wide
-// memories and the processors) is twice that: rows d and h, 6 pitches apart,
-// its body standing over rows e, f and g between them — holes nothing else may
-// use (`coveredHoles`; occupancy.js claims them for the chip).
+// memories and the processors) is twice that, 6 pitches, and there are four
+// pairs of rows that far apart across the trench: b/f, c/g, d/h and e/i. Its
+// body stands over the three rows between its pins — holes nothing else may
+// use (`coveredHoles`; occupancy.js claims them for the chip). Every one of
+// those seats makes the same connections: each half-column is one strip, so
+// only which holes are blocked differs.
 //
-// THE ANCHOR'S ROW SAYS WHICH. A 600-mil part anchored in row e is the seat
-// every DIP took before wide seating existed (2026-10-05), and a desk saved
-// then keeps it exactly — there is no migration. Placing a part, or moving one
-// on its own, seats it at its true width (`seatRow`); a selection dragged or
-// pasted as a group moves rigidly, so each chip in it keeps the form it had;
-// and the generators (the AI builder's compiler, the demo benches) still seat
-// every DIP in rows e and f, which stays a legal seat.
+// THE ANCHOR'S ROW SAYS WHICH — with one exception. A 600-mil part anchored in
+// row e is the narrow e/f seat every DIP took before wide seating existed
+// (2026-10-05): a desk saved then keeps it exactly, and the generators (the AI
+// builder's compiler, the demo benches) still seat every DIP there. So the
+// e/i seat is the one that has to say so: `params.wide` (`WIDE_PARAM`), kept
+// only on a 600-mil chip in row e (`withSeat`). Placing a part, or moving one
+// on its own, seats it at its true width in whichever of the four the pointer
+// is nearest (seating.js); a selection dragged or pasted as a group moves
+// rigidly, so each chip in it keeps the seat it had.
 
 /** The DIP packages the catalog may reference. `body` is the width in mils.
     DIP-2/DIP-4 began as the bodies the 1- and 2-position DIP switch banks
@@ -114,12 +119,25 @@ const NARROW = Object.freeze({
   span: 3,
   covers: Object.freeze([]),
 });
-const WIDE = Object.freeze({
-  lower: "d",
-  upper: "h",
-  span: 6,
-  covers: Object.freeze(["e", "f", "g"]),
+/** The 600-mil seats by pin 1's row: pins six pitches apart across the
+    trench, the body over the three rows between. d/h is the one a new seat
+    takes with nothing to say otherwise (`seatRow`). */
+const wideSeat = (lower, upper, covers) =>
+  Object.freeze({ lower, upper, span: 6, covers: Object.freeze(covers) });
+const WIDE_SEATS = Object.freeze({
+  b: wideSeat("b", "f", ["c", "d", "e"]),
+  c: wideSeat("c", "g", ["d", "e", "f"]),
+  d: wideSeat("d", "h", ["e", "f", "g"]),
+  e: wideSeat("e", "i", ["f", "g", "h"]),
 });
+const WIDE = WIDE_SEATS.d;
+
+/** The rows pin 1 of a 600-mil part may take at its true width. */
+export const WIDE_SEAT_ROWS = Object.freeze(Object.keys(WIDE_SEATS));
+
+/** The chip param that puts a 600-mil part anchored in row e in the wide e/i
+    seat rather than the narrow e/f one. */
+export const WIDE_PARAM = "wide";
 
 /** Is this a 600-mil package (its pins six pitches apart, not three)? */
 export function isWidePackage(pkg) {
@@ -127,8 +145,8 @@ export function isWidePackage(pkg) {
 }
 
 /**
- * The row pin 1 takes when a package is PLACED (or moved) now: d for a 600-mil
- * package, e for everything else.
+ * The row pin 1 takes when a package is PLACED (or moved) with nothing to
+ * choose between seats: d for a 600-mil package, e for everything else.
  * @returns {"d"|"e"}
  */
 export function seatRow(pkg) {
@@ -138,28 +156,52 @@ export function seatRow(pkg) {
 /**
  * The rows a package's pins take with pin 1 anchored in `anchorRow` —
  * `{ lower, upper, span, covers }` — or null for a row it cannot anchor in.
- * Row e is every package's narrow seat (a 600-mil one's only from a document
- * saved before wide seating); row d is a 600-mil package's true width.
+ * Row e is every package's narrow seat, unless `wide` puts a 600-mil one in
+ * rows e and i; rows b, c and d are a 600-mil package's other wide seats.
  */
-export function dipRows(pkg, anchorRow = seatRow(pkg)) {
-  if (anchorRow === NARROW.lower) {
-    packageSpec(pkg); // junk still throws INVALID_PACKAGE
-    return NARROW;
-  }
-  if (anchorRow === WIDE.lower && isWidePackage(pkg)) return WIDE;
-  return null;
+export function dipRows(pkg, anchorRow = seatRow(pkg), wide = false) {
+  const isWide = isWidePackage(pkg); // junk throws INVALID_PACKAGE
+  if (anchorRow === NARROW.lower && !(wide && isWide)) return NARROW;
+  return (isWide && WIDE_SEATS[anchorRow]) || null;
+}
+
+/** Does a chip's params ask for the wide e/i seat (`WIDE_PARAM`)? */
+export function seatsWide(params) {
+  return params?.[WIDE_PARAM] === true;
+}
+
+/**
+ * `dipRows` for a SEATED chip: pin 1's row read off its anchor hole ("d12"),
+ * the e/i marker off its params. Null when it cannot seat there.
+ */
+export function seatedRows(pkg, anchor, params) {
+  return dipRows(pkg, String(anchor ?? "").charAt(0), seatsWide(params));
+}
+
+/**
+ * A chip's params for a seat with pin 1 in `anchorRow`: the e/i marker set
+ * when the seat is that one, and dropped everywhere else — the anchor row says
+ * all the other seats by itself.
+ * @returns {object} a copy
+ */
+export function withSeat(pkg, params, anchorRow, wide) {
+  const { [WIDE_PARAM]: _was, ...rest } = params ?? {};
+  return anchorRow === NARROW.lower && wide && isWidePackage(pkg)
+    ? { ...rest, [WIDE_PARAM]: true }
+    : rest;
 }
 
 /**
  * Row + column offset of one pin relative to the anchor column (pin 1's
  * column), for a package anchored in `anchorRow` (by default the row it is
  * placed in now — `seatRow`). Returns null for a pin number outside the
- * package, or an anchor row it cannot seat in.
+ * package, or an anchor row it cannot seat in. `wide` is the e/i seat's
+ * marker (`dipRows`).
  * @returns {{ row: string, dcol: number }|null}
  */
-export function pinOffset(pkg, pin, anchorRow = seatRow(pkg)) {
+export function pinOffset(pkg, pin, anchorRow = seatRow(pkg), wide = false) {
   const { pins, halfPins } = packageSpec(pkg);
-  const rows = dipRows(pkg, anchorRow);
+  const rows = dipRows(pkg, anchorRow, wide);
   if (!rows) return null;
   if (!Number.isInteger(pin) || pin < 1 || pin > pins) return null;
   return pin <= halfPins
@@ -169,15 +211,21 @@ export function pinOffset(pkg, pin, anchorRow = seatRow(pkg)) {
 
 /**
  * Every pin's seated hole for a package anchored at `anchorCol` (pin 1's
- * column) in `anchorRow` — empty when it cannot anchor there.
+ * column) in `anchorRow` (`wide`: the e/i seat — `dipRows`) — empty when it
+ * cannot anchor there.
  * @returns {Array<{ pin: number, row: string, col: number }>}
  */
-export function allPinHoles(pkg, anchorCol, anchorRow = seatRow(pkg)) {
+export function allPinHoles(
+  pkg,
+  anchorCol,
+  anchorRow = seatRow(pkg),
+  wide = false,
+) {
   const { pins } = packageSpec(pkg);
-  if (!dipRows(pkg, anchorRow)) return [];
+  if (!dipRows(pkg, anchorRow, wide)) return [];
   const out = [];
   for (let pin = 1; pin <= pins; pin++) {
-    const { row, dcol } = pinOffset(pkg, pin, anchorRow);
+    const { row, dcol } = pinOffset(pkg, pin, anchorRow, wide);
     out.push({ pin, row, col: anchorCol + dcol });
   }
   return out;
@@ -185,15 +233,20 @@ export function allPinHoles(pkg, anchorCol, anchorRow = seatRow(pkg)) {
 
 /**
  * The holes a seated package's BODY stands over — between its two pin rows, in
- * each of its columns: rows e, f and g under a 600-mil part at its true width,
- * nothing under a narrow seat (only the trench lies between rows e and f). A
+ * each of its columns: the three rows between a 600-mil part's pins at its true
+ * width (e, f and g in the d/h seat), nothing under a narrow seat (only the trench lies between rows e and f). A
  * real part's plastic is in the way of those holes, so nothing may be plugged
  * into one.
  * @returns {Array<{ row: string, col: number }>}
  */
-export function coveredHoles(pkg, anchorCol, anchorRow = seatRow(pkg)) {
+export function coveredHoles(
+  pkg,
+  anchorCol,
+  anchorRow = seatRow(pkg),
+  wide = false,
+) {
   const { halfPins } = packageSpec(pkg);
-  const rows = dipRows(pkg, anchorRow);
+  const rows = dipRows(pkg, anchorRow, wide);
   if (!rows) return [];
   const out = [];
   for (const row of rows.covers) {

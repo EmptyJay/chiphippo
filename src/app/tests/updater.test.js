@@ -175,15 +175,108 @@ test("Restart waits for Squirrel BEFORE anything is asked: ready at once off mac
   assert.equal(native.listenerCount("update-downloaded"), listening, "taken back"); // prettier-ignore
 });
 
-test("a wait for Squirrel that runs out, or a quit meanwhile, is a no — and leaves nothing armed", async () => {
+test("a wait for Squirrel that runs out, or an install error meanwhile, is a no — and leaves nothing armed", async () => {
+  autoUpdater.emit("update-downloaded", { version: "9.9.9" }); // fresh
   squirrel(false);
   const listening = native.listenerCount("update-downloaded");
+  const erroring = autoUpdater.listenerCount("error");
   assert.equal(await updater.readyToInstall({ platform: "darwin", waitMs: 5 }), false); // prettier-ignore
   assert.equal(native.listenerCount("update-downloaded"), listening);
-  const quitting = updater.readyToInstall({ platform: "darwin", waitMs: 1000 });
-  app.emit("before-quit");
-  assert.equal(await quitting, false);
+  assert.equal(updater.installBlocked(), true, "running out counts: waiting again would run out again"); // prettier-ignore
+  // Squirrel refuses the download: said at once, not at the deadline — and
+  // as an install's failure, never a "check failed" (no check is running).
+  autoUpdater.emit("update-downloaded", { version: "9.9.9" });
+  assert.equal(updater.installBlocked(), false, "a new download clears it");
+  pushed.length = 0;
+  const refused = updater.readyToInstall({ platform: "darwin", waitMs: 60_000 }); // prettier-ignore
+  autoUpdater.emit("error", new Error("code signature"));
+  assert.equal(await refused, false);
   assert.equal(native.listenerCount("update-downloaded"), listening);
+  assert.equal(autoUpdater.listenerCount("error"), erroring, "taken back");
+  assert.deepEqual(pushed.map((p) => [p.channel, p.payload.manual]), [["updater:error", false]]); // prettier-ignore
+  await blockedUntilFetchedAgain();
+});
+
+/** After Squirrel failed the download, Restart answers no AT ONCE — no wait,
+    no check of its own (whose progress would talk over the wait) — until a
+    new download (Check for Updates) gives Squirrel another to take. */
+async function blockedUntilFetchedAgain() {
+  let waited = 0;
+  const checks = autoUpdater.checks.length;
+  assert.equal(updater.installBlocked(), true);
+  assert.equal(await updater.readyToInstall({ platform: "darwin", onWait: () => waited++ }), false); // prettier-ignore
+  assert.equal(waited, 0, "no wait");
+  assert.equal(autoUpdater.checks.length, checks, "and no check started");
+  autoUpdater.emit("update-downloaded", { version: "9.9.10" }); // fetched again
+  assert.equal(updater.downloadedVersion(), "9.9.10");
+  const again = updater.readyToInstall({ platform: "darwin", onWait: () => waited++ }); // prettier-ignore
+  assert.equal(waited, 1, "waiting again");
+  native.emit("update-downloaded");
+  assert.equal(await again, true);
+}
+
+test("a refusal BEFORE Restart is remembered: the Restart says so at once rather than waiting it out", async () => {
+  autoUpdater.emit("update-downloaded", { version: "9.9.9" });
+  squirrel(false);
+  pushed.length = 0;
+  autoUpdater.emit("error", new Error("code signature")); // no wait, no check
+  assert.equal(pushed.at(-1).payload.manual, false, "an install's, not a check's"); // prettier-ignore
+  await blockedUntilFetchedAgain();
+});
+
+test("a manual check's DOWNLOAD failing is said as that check's failure — not another check's", async () => {
+  updater.checkForUpdates({ manual: true });
+  autoUpdater.emit("update-available", { version: "9.9.11" }); // the check answers…
+  pushed.length = 0;
+  autoUpdater.emit("error", new Error("download failed")); // …then the download fails
+  assert.equal(pushed.at(-1).payload.manual, true);
+  // The startup check's download failing stays quiet.
+  updater.checkForUpdates({ manual: false });
+  autoUpdater.emit("update-available", { version: "9.9.11" });
+  autoUpdater.emit("error", new Error("download failed"));
+  assert.equal(pushed.at(-1).payload.manual, false);
+  autoUpdater.checks.splice(0).forEach((resolve) => resolve());
+  await new Promise((r) => setImmediate(r));
+  // A manual download under way, and a startup check failing beside it: the
+  // check's failure is quiet, the download's still the manual one's.
+  updater.checkForUpdates({ manual: true });
+  autoUpdater.emit("update-available", { version: "9.9.12" });
+  updater.checkForUpdates({ manual: false });
+  autoUpdater.emit("error", new Error("offline")); // the startup check's
+  assert.equal(pushed.at(-1).payload.manual, false, "the check's: quiet");
+  autoUpdater.emit("error", new Error("download failed"));
+  assert.equal(pushed.at(-1).payload.manual, true, "the manual download's: said"); // prettier-ignore
+  autoUpdater.checks.splice(0).forEach((resolve) => resolve());
+  await new Promise((r) => setImmediate(r));
+});
+
+test("a quit the user cancels, or a check's error, leaves the wait for Squirrel waiting — and no check starts during it", async () => {
+  autoUpdater.emit("update-downloaded", { version: "9.9.9" }); // fresh: nothing refused
+  squirrel(false);
+  updater.checkForUpdates({ manual: true }); // already running
+  const waiting = updater.readyToInstall({ platform: "darwin", waitMs: 60_000 }); // prettier-ignore
+  let answer = null;
+  void waiting.then((ok) => (answer = ok));
+  app.emit("before-quit"); // …and then Cancel on the unsaved-work question
+  pushed.length = 0;
+  autoUpdater.emit("error", new Error("offline")); // the check's
+  assert.equal(
+    pushed.at(-1).payload.manual,
+    true,
+    "a check's own failure, said",
+  );
+  // Help ▸ Check during the wait would re-serve the download Squirrel is
+  // taking: it does not start, and is told why.
+  const checks = autoUpdater.checks.length;
+  updater.checkForUpdates({ manual: true });
+  assert.equal(autoUpdater.checks.length, checks, "no check started");
+  assert.equal(pushed.at(-1).channel, "updater:preparing");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(answer, null, "still waiting");
+  native.emit("update-downloaded");
+  assert.equal(await waiting, true, "and the Restart goes ahead when it is ready"); // prettier-ignore
+  autoUpdater.checks.splice(0).forEach((resolve) => resolve());
+  await new Promise((r) => setImmediate(r));
 });
 
 test("an error from a check already running is not blamed on the install", async () => {

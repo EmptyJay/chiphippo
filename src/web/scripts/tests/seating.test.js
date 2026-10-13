@@ -23,7 +23,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ROW_BAND, SEAT_BAND, partSeatAt } from "../model/seating.js";
+import {
+  ROW_BAND,
+  SEAT_BAND,
+  partSeatAt,
+  seatGrabDy,
+} from "../model/seating.js";
 import { spec } from "../model/breadboard.js";
 
 const FULL = { id: "bb1", type: "pins-full", x: 0, y: 0 };
@@ -42,7 +47,9 @@ test("a DIP centres on the cursor and anchors in row e", () => {
 
 test("a 600-mil DIP anchors in row d — six pitches across, at its true width", () => {
   // DIP-28 is 14 columns wide: centring on column 20 anchors at 20 − 6.5 → 14.
-  assert.deepEqual(at([FULL], "HM62256", 20, 6.5), { board: "bb1", anchor: "d14" }); // prettier-ignore
+  // The cursor is nearest the middle of rows d and h (and `wide` says it is
+  // not the e/i seat).
+  assert.deepEqual(at([FULL], "HM62256", 20, 6.5), { board: "bb1", anchor: "d14", wide: false }); // prettier-ignore
   for (const ref of ["74LS181", "28C16", "AS6C1024", "W65C02", "Z80A"]) {
     assert.equal(at([FULL], ref, 30, 6.5)?.anchor.charAt(0), "d", ref);
   }
@@ -71,22 +78,69 @@ test("a DIP seats from anywhere inside the trench band, and nowhere beyond", () 
   );
 });
 
-test("a 600-mil chip at its true width seats from anywhere it is drawn over", () => {
-  // Rows d and h sit 2.5 below and 3.5 above the trench's centre, and the
-  // drawing reaches 0.6 past each: a drag grabbing the upper legs, or the top
-  // of the body, must still find a seat (it found none at SEAT_BAND).
-  const { trench, rowY } = spec("pins-full");
+test("a 600-mil ghost takes the wide seat whose middle is nearest the cursor", () => {
+  const { rowY, trench } = spec("pins-full");
+  const seatAt = (y) => {
+    const seat = at([FULL], "HM62256", 20, y);
+    return seat && `${seat.anchor.charAt(0)}${seat.wide ? "+" : ""}`;
+  };
+  // Each seat's middle is halfway between its two pin rows.
+  assert.equal(seatAt((rowY.e + rowY.i) / 2), "e+");
+  assert.equal(seatAt((rowY.d + rowY.h) / 2), "d");
+  assert.equal(seatAt((rowY.c + rowY.g) / 2), "c");
+  assert.equal(seatAt((rowY.b + rowY.f) / 2), "b");
+  // Halfway between two middles goes to d/h, the seat a new chip takes.
+  assert.equal(seatAt(trench.centerY), "d");
+  // Farther out the outermost seat holds while the cursor is over its drawing…
+  assert.equal(seatAt(rowY.b + 0.55), "b");
+  assert.equal(seatAt(rowY.i - 0.55), "e+");
+  // …and past it nothing seats.
+  assert.equal(seatAt(rowY.b + 0.65), null);
+  assert.equal(seatAt(rowY.i - 0.65), null);
+  // A 300-mil part has only e/f, wherever the cursor is in the band.
+  assert.equal(at([FULL], "74LS00", 10, rowY.f)?.anchor, "e7");
+  assert.equal(at([FULL], "74LS00", 10, rowY.f)?.wide, undefined);
+});
+
+test("a dragged 600-mil chip keeps its seat from anywhere it is drawn over, and changes it by the pointer's travel", () => {
+  const { rowY, trench } = spec("pins-full");
   const grab = -6; // a drag holding the chip by its middle columns
-  for (const y of [rowY.h, rowY.h - 0.55, rowY.g, rowY.d, rowY.d + 0.55]) {
-    assert.equal(at([FULL], "HM62256", 20, y, grab)?.anchor, "d14", `y ${y}`);
+  const comp = { ref: "HM62256", board: "bb1", anchor: "d14", params: {} };
+  // Held anywhere on it — the upper legs, the top of the body, the lower legs
+  // — and not moved: still d/h.
+  for (const y of [rowY.h - 0.55, rowY.h, rowY.g, rowY.d, rowY.d + 0.55]) {
+    const grabDy = seatGrabDy([FULL], comp, { x: 20, y });
+    const seat = partSeatAt([FULL], "HM62256", { x: 20, y }, grab, null, { grabDy }); // prettier-ignore
+    assert.equal(seat?.anchor, "d14", `y ${y}`);
+    // One row down drops it to c/g, one row up lifts it to e/i.
+    const down = partSeatAt([FULL], "HM62256", { x: 20, y: y + 1 }, grab, null, { grabDy }); // prettier-ignore
+    const up = partSeatAt([FULL], "HM62256", { x: 20, y: y - 1 }, grab, null, { grabDy }); // prettier-ignore
+    assert.equal(down?.anchor, "c14", `down from ${y}`);
+    assert.deepEqual([up?.anchor, up?.wide], ["e14", true], `up from ${y}`);
   }
-  // …and still nowhere past the drawing.
-  assert.equal(at([FULL], "HM62256", 20, trench.centerY - 4.2, grab), null);
-  // A narrow seat keeps the old band: the 300-mil band covers it already.
+  // …and nowhere past the drawing of the seat it would take.
+  const grabDy = seatGrabDy([FULL], comp, { x: 20, y: trench.centerY });
+  assert.equal(partSeatAt([FULL], "HM62256", { x: 20, y: rowY.a + 1 }, grab, null, { grabDy }), null); // prettier-ignore
+  // A narrow seat kept by a rigid move keeps the old band.
   const narrow = (y) =>
     partSeatAt([FULL], "HM62256", { x: 20, y }, grab, null, { chipRow: "e" });
   assert.ok(narrow(trench.centerY + SEAT_BAND));
   assert.equal(narrow(trench.centerY + SEAT_BAND + 0.01), null);
+  // The e/i seat kept by a rigid move asks for its marker, and gets it back.
+  const kept = partSeatAt([FULL], "HM62256", { x: 20, y: rowY.g }, grab, { wide: true }, { chipRow: "e" }); // prettier-ignore
+  assert.deepEqual([kept?.anchor, kept?.wide], ["e14", true]);
+});
+
+test("seatGrabDy: how far below its seat's middle a point on a seated chip is", () => {
+  const { rowY } = spec("pins-full");
+  const chip = (anchor, params = {}) => ({ ref: "HM62256", board: "bb1", anchor, params }); // prettier-ignore
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  assert.ok(near(seatGrabDy([FULL], chip("d14"), { x: 0, y: rowY.d }), 3));
+  assert.ok(near(seatGrabDy([FULL], chip("e14", { wide: true }), { x: 0, y: rowY.i }), -3)); // prettier-ignore
+  // The narrow e/f seat's middle is the trench's.
+  assert.ok(near(seatGrabDy([FULL], chip("e14"), { x: 0, y: rowY.e }), 1.5));
+  // Not a seated DIP: nothing to offset.
+  assert.equal(seatGrabDy([FULL], { ref: "led", board: "bb1", anchor: "a1" }, { x: 0, y: 5 }), 0); // prettier-ignore
 });
 
 test("a DIP never seats on a rail — no trench to straddle", () => {

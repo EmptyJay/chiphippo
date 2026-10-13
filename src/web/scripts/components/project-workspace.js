@@ -109,7 +109,9 @@ import {
   withPlacedChips,
 } from "../model/project-doc.js";
 import { exampleDesktops } from "../model/example-desktops.js";
-import { setCustomChips } from "../catalog/index.js";
+import { programmedPatch } from "../model/rom-binding.js";
+import { isRomChip } from "../sim/chip-eval.js";
+import { partDef, setCustomChips } from "../catalog/index.js";
 import {
   chipRegistry,
   chipsMissingFrom,
@@ -132,6 +134,51 @@ import {
  * flushes on the way out of sight anyway.
  */
 const AUTO_SAVE_MS = 30_000;
+
+// The boot's notes about a working slot it could not read (boot-slot.js).
+const SLOT_NOTES = new Set(["workspace.slotAside", "workspace.slotLeft"]);
+
+/** `copy` (a duplicate of `sent`, its ROMs on files of their own) with each
+    ROM chip's programmed/source/edited flags as the source has them `now` —
+    for the chips that are still the ones copied (the same file as in `sent`;
+    not one placed since under a reused id). `storage.guid` stays the copy's. */
+function withRomFlagsOf(copy, sent, now) {
+  if (!copy?.components) return copy;
+  const copied = new Map((sent?.components ?? []).map((c) => [c.id, c.params?.storage?.guid])); // prettier-ignore
+  const roms = new Map();
+  for (const c of now?.components ?? []) {
+    const guid = c.params?.storage?.guid;
+    if (isRomChip(partDef(c.ref)) && guid && copied.get(c.id) === guid) {
+      roms.set(c.id, c);
+    }
+  }
+  return {
+    ...copy,
+    components: copy.components.map((c) => {
+      const from = roms.get(c.id);
+      const guid = c.params?.storage?.guid;
+      if (from?.ref !== c.ref || !guid) return c;
+      const params = { ...c.params, storage: { ...from.params?.storage, guid } }; // prettier-ignore
+      if (from.params?.programmed === true) params.programmed = true;
+      else delete params.programmed;
+      return { ...c, params };
+    }),
+  };
+}
+
+/** `doc` with ROM chip `compId` flagged programmed (`programmedPatch`), or
+    null when it holds no such chip — or, given its file's `guid`, none that
+    names that file. A new document; `doc` is untouched. */
+function flagRomIn(doc, compId, binding, guid = null) {
+  const comp = doc?.components?.find((c) => c.id === compId);
+  if (!comp || !isRomChip(partDef(comp.ref))) return null;
+  if (guid != null && comp.params?.storage?.guid !== guid) return null;
+  const params = { ...comp.params, ...programmedPatch(comp.params, true, binding) }; // prettier-ignore
+  return {
+    ...doc,
+    components: doc.components.map((c) => (c === comp ? { ...c, params } : c)), // prettier-ignore
+  };
+}
 
 /** The longest a desk swap waits for what its Stop holds it for (a kept ROM
     edit's write — milliseconds, unless the disk has stopped answering). */
@@ -195,8 +242,12 @@ export class ProjectWorkspace {
   #locked = false; // editing frozen (the circuit is running)
   #examples = new Map(); // ref → the in-flight openExample promise
   #swaps = Promise.resolve(); // the desk swaps asked for, run one at a time
-  #selecting = null; // a tab switch queued and not yet begun…
-  #selectTo = null; // …and the tab it goes to: the last one clicked
+  #projectSerial = 0; // counts the projects opened (see `deskWhere`)
+  #lastSwap = null; // the swap queued last
+  #waiting = 0; // the `#awaitHolds` under way (the strip is busy meanwhile)
+  // A tab switch queued and not yet begun, `{to, turn}`: the tab it goes to
+  // (the last one clicked) and its place in the queue.
+  #selecting = null;
   #inFlight = null; // the write chain's tail, or null when nothing is writing
   #busy = false; // a leave/quit question is out, or a project is being swapped
   #autoSaveMs = 0; // 0 = off
@@ -1144,6 +1195,7 @@ export class ProjectWorkspace {
   #oneSwapAtATime(run) {
     const turn = this.#swaps.then(run);
     this.#swaps = turn.catch(() => {});
+    this.#lastSwap = turn;
     return turn;
   }
 
@@ -1163,14 +1215,22 @@ export class ProjectWorkspace {
 
   /** Put another desktop on the desk. Clicks made before the switch gets
       its turn are ONE switch, to the last tab clicked — not a desk loaded
-      and left for each. */
+      and left for each. Only while that switch is the LAST thing queued: a
+      click after a queued add (or import, or delete) is a switch of its own,
+      after it, or the add would land last and the click be lost. */
   selectTab(id) {
-    this.#selectTo = id;
-    this.#selecting ??= this.#oneSwapAtATime(() => {
-      this.#selecting = null;
-      return this.#selectTab(this.#selectTo);
+    const queued = this.#selecting;
+    if (queued && queued.turn === this.#lastSwap) {
+      queued.to = id;
+      return queued.turn;
+    }
+    const select = { to: id, turn: null };
+    select.turn = this.#oneSwapAtATime(() => {
+      if (this.#selecting === select) this.#selecting = null;
+      return this.#selectTab(select.to);
     });
-    return this.#selecting;
+    this.#selecting = select;
+    return select.turn;
   }
 
   async #selectTab(id) {
@@ -1199,16 +1259,19 @@ export class ProjectWorkspace {
     // the stash — so duplicating the ACTIVE desktop copies what is on screen,
     // kept ROM bytes and all (main copies each ROM's file as it stands).
     await this.#leaveActiveDesk();
+    const sent = findDesktop(this.#project, id).doc;
     let res;
     try {
-      res = await this.#bridge.desktop.duplicate(
-        findDesktop(this.#project, id).doc,
-      );
+      res = await this.#bridge.desktop.duplicate(sent);
     } catch (err) {
       this.#fail(t("workspace.failDuplicate"), err);
       return;
     }
-    const copy = canonical(res?.doc);
+    // A late ROM write can land while main copies (it answers in order, so
+    // the copied FILE has its bytes) — flagging the source after the doc
+    // went. The copy takes the flags the source has now, its own files kept.
+    const now = findDesktop(this.#project, id)?.doc;
+    const copy = canonical(now && now !== sent ? withRomFlagsOf(res?.doc, sent, now) : res?.doc); // prettier-ignore
     this.#project = duplicateDesktop(this.#project, id, copy).meta;
     this.#loadActive();
     this.#renderTabs();
@@ -1515,6 +1578,7 @@ export class ProjectWorkspace {
   #adopt(raw) {
     const meta = normalizeProject(raw);
     if (!meta) return false;
+    this.#projectSerial += 1; // another project: what pointed at the last is stale
     // The designed chips first: canonicalizing a desktop reads its parts
     // against the catalog, and a custom chip's ref means nothing until then.
     // Any the library does not hold join it.
@@ -1740,19 +1804,83 @@ export class ProjectWorkspace {
       new CustomEvent("chiphippo:desk-leaving", { detail: { project, hold } }),
     );
     this.#sim?.stop?.();
+    await this.#awaitHolds(holds);
+  }
+
+  /**
+   * Wait for what was `hold()`-ed — but not forever: a write that never
+   * answers must not hold every switch (or the quit) after it. Past HOLD_MS
+   * (`holdMs`) it goes on; a write landing later flags its chip in the
+   * desktop it belongs to (MemoryBridge `#landed` → `markRomKept`). The strip
+   * shows it is busy meanwhile: what is clicked now waits its turn.
+   */
+  async #awaitHolds(holds) {
     if (!holds.length) return;
-    // Not forever: a write that never answers must not hold every switch
-    // after it. Past HOLD_MS (`holdMs`) the swap goes on; a write landing later finds its
-    // desk gone and flags nothing (MemoryBridge `keepRunEdits` `stillHere`).
     let timer = null;
     const late = new Promise((r) => (timer = setTimeout(r, this.#holdMs)));
-    this.#tabsView?.setBusy?.(true); // what is clicked now waits its turn
+    // Counted: the leave question's wait and a swap's can overlap, and the
+    // strip is busy until the LAST of them is done.
+    if (this.#waiting++ === 0) this.#tabsView?.setBusy?.(true);
     try {
       await Promise.race([Promise.allSettled(holds), late]);
     } finally {
       clearTimeout(timer);
-      this.#tabsView?.setBusy?.(false);
+      if (--this.#waiting === 0) this.#tabsView?.setBusy?.(false);
     }
+  }
+
+  /**
+   * Where the document on the desk belongs — which project (as opened) and
+   * which desktop — for a write that may land after it has been swapped out
+   * (`markRomKept`).
+   */
+  deskWhere() {
+    return { project: this.#projectSerial, tab: this.#project?.activeTab ?? null }; // prettier-ignore
+  }
+
+  /**
+   * A ROM write has landed: flag its chip (`programmedPatch`, `binding` as
+   * the write's) in the desktop the write BEGAN on (`where`, `deskWhere` as
+   * it began) — whatever has happened to the desk since. EVERY write comes
+   * here (MemoryBridge `#landed`), because "since" can be a gap no epoch
+   * sees: a swap stashes the desk it is leaving and only then awaits the aux
+   * windows closing, and main answers in order, so a write slow enough to
+   * pass `HOLD_MS` lands right there — on a desk already stashed, about to
+   * go. So both copies are flagged:
+   *   · on the desk, when that desktop is the active one (its own undo step,
+   *     as an on-desk flag always was);
+   *   · in the project's copy of it — and, when it is not on the desk, in
+   *     its undo history's present AND redo future (`syncForward`), or an
+   *     undo-then-redo there — or a redo already waiting — would put the
+   *     unflagged document back.
+   * Nothing if that project has gone (it was saved or discarded), the
+   * desktop has (deleted), or the chip has — or is another one now, under
+   * the same id (`guid`, the written file's: only the chip naming it).
+   * @param {{project: number, tab: string|null}|null} where
+   * @param {string} compId
+   * @param {{source?: string|null, edited?: boolean}} binding
+   * @param {string|null} [guid]
+   * @returns {boolean} whether a chip was flagged — the project then has new
+   *   bytes to save. On the desk, the DESK's answer: the project's copy of
+   *   the active desktop may be older than it (a chip deleted since).
+   */
+  markRomKept(where, compId, binding, guid = null) {
+    if (!this.#project || where?.project !== this.#projectSerial) return false;
+    const onDesk = where.tab === this.#project.activeTab;
+    const onDeskFlagged = onDesk && this.#controller?.setMemoryProgrammed?.(compId, true, binding, { guid }) === true; // prettier-ignore
+    const tab = findDesktop(this.#project, where.tab);
+    const doc = tab && flagRomIn(tab.doc, compId, binding, guid);
+    if (doc) {
+      this.#project = setDesktopDoc(this.#project, where.tab, doc);
+      if (!onDesk) {
+        this.#state
+          .get(where.tab)
+          ?.history?.syncForward((snap) => flagRomIn(snap, compId, binding, guid)); // prettier-ignore
+      }
+    }
+    const flagged = onDesk ? onDeskFlagged : doc != null;
+    if (flagged) this.#announce();
+    return flagged;
   }
 
   /** Put the active desktop's document on the desk, with its own history. */
@@ -1807,10 +1935,14 @@ export class ProjectWorkspace {
       try {
         this.#stash();
         const written = projectForFile(this.#project);
-        await this.#bridge.project.recovery.write(
+        const res = await this.#bridge.project.recovery.write(
           written,
           this.#project.location,
         );
+        if (res?.code === "slot-held") {
+          this.#fail(t("workspace.failSave"), new Error(t("workspace.slotHeld")), { quiet }); // prettier-ignore
+          return false;
+        }
         // `#saved` is deliberately untouched: the project's own FILE has not
         // changed, so the • stands and "discard" is still the truth.
         this.#stashed = projectSignature(written);
@@ -2005,10 +2137,23 @@ export class ProjectWorkspace {
    */
   async #confirmLeaveProject({ quitting = false } = {}) {
     // A desktop swap still under way (its Stop's kept ROM edits being written
-    // into the desk it leaves) finishes first: the question — and the save it
-    // may lead to — is then about the project as it will stand, not one with
-    // that write still to land after it.
-    await this.#swaps;
+    // into the desk it leaves) finishes first, and so does any ROM write in
+    // flight (a plain Stop's keep, an inspector's Save — `writes-pending`):
+    // the question — and the save it may lead to — is then about the project
+    // as it will stand. Until the write has landed the project does not know
+    // it has bytes to save, and a quit would not have asked.
+    // Until BOTH are quiet: a tab clicked during the writes' wait queues a
+    // swap, which must not be left running under the question. (Bounded:
+    // each wait is at most HOLD_MS, and a few rounds is all clicks can buy.)
+    for (let round = 0; round < 3; round++) {
+      const swaps = this.#swaps;
+      await swaps;
+      const holds = [];
+      const hold = (promise) => holds.push(promise);
+      window.dispatchEvent(new CustomEvent("chiphippo:writes-pending", { detail: { hold } })); // prettier-ignore
+      await this.#awaitHolds(holds);
+      if (this.#swaps === swaps) break;
+    }
     return this.#askLeave(quitting);
   }
 
@@ -2077,13 +2222,26 @@ export class ProjectWorkspace {
   }
 
   /** Surface what opening a project could not bring across (a v3 desktop file
-      that has gone missing, above all) — one notice, listing every one. */
+      that has gone missing, above all) — one notice, listing every one. The
+      boot's notes about a working slot it could not read come as FACTS,
+      `{key, path}` (boot-slot.js), worded here in the user's language, and
+      under their own title: no desktop is missing. */
   #warn(warnings) {
     if (!Array.isArray(warnings) || warnings.length === 0) return;
-    PopupManager.notify({
-      title: t("workspace.restoreWarnTitle"),
-      message: warnings.join("\n"),
-    });
+    const slot = warnings.filter((w) => SLOT_NOTES.has(w?.key));
+    const rest = warnings.filter((w) => typeof w === "string");
+    if (slot.length) {
+      PopupManager.notify({
+        title: t("workspace.slotUnreadTitle"),
+        message: slot.map((w) => t(w.key, { path: String(w.path ?? "") })).join("\n"), // prettier-ignore
+      });
+    }
+    if (rest.length) {
+      PopupManager.notify({
+        title: t("workspace.restoreWarnTitle"),
+        message: rest.join("\n"),
+      });
+    }
   }
 
   #announce() {

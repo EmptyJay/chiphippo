@@ -318,7 +318,11 @@ a red `*` beside it too, which he dropped as redundant (2026-10-04) — don't br
   a Zener backwards at `zenerVolts`), burning by its junction temperature.
 - **Transistor = an analog-switch channel** (`logic.channels`, the CD4066B's mechanism —
   `channelGroups`). TO-92 `[0,1,2]`, pins E·B·C / S·G·D (control `input`, switched `io`),
-  `reversible` (R turns it end-for-end). `floating: "unknown"` (families.js
+  `reversible` (R turns it end-for-end; the pot, the relay and the regulators too,
+  2026-10-12). Turned, the BODY turns a half lap about the row's middle hole on the desk
+  (discrete-view.js `turnsHalfLap`/`turnHalfLap`, its box mirrored in `discreteBox`, every
+  word turned back upright) and in 3D (part-models.js `partFrame`); only the resistor
+  array stays drawn unturned (its body is symmetric, so its pin-1 dot moves instead). `floating: "unknown"` (families.js
   `floatsUnknown` honours a def's own) so a floating control reads X, never TTL's HIGH. A
   part with NO supply pins is `passive`: always OK, never in `chipStatus` (the desk
   review counts chips from it), skipped by the floating-input sweep. **BJT**: on iff the

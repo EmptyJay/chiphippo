@@ -226,11 +226,12 @@ test("RC fade: each LED stays lit in proportion to its capacitor", () => {
     0.01,
     "the ratio of the LEDs' fade times",
   );
-  // And the figures the desk's own caption quotes. The LED's forward voltage
-  // gives these no closed form (only the ratio has one, above), so they are
-  // held to what the caption says — a change to the engine's time or the
-  // LED's curve that moves them must move the caption too.
-  near(charged[0], 3.91, 0.02, "the charge the caption reads (5 V less the diode and the 100 Ω)"); // prettier-ignore
+  // And absolute figures. The LED's forward voltage gives these no closed
+  // form (only the ratio has one, above), so they are held to measured
+  // values: the full charge (not in the caption), and the two fade times the
+  // desk's own caption quotes — a change to the engine's time or the LED's
+  // curve that moves those must move the caption too.
+  near(charged[0], 3.91, 0.02, "the full charge: 5 V less the diode and the 100 Ω"); // prettier-ignore
   near(dark.get(leds[big].id), 6.4, 0.03, "the 1000 µF LED's fade the caption quotes"); // prettier-ignore
   near(dark.get(leds[small].id), 1.4, 0.03, "the 220 µF LED's fade the caption quotes"); // prettier-ignore
 });

@@ -1385,6 +1385,8 @@ function openMemoryWindow(compId, ref) {
     if (memoryWindows.get(compId) !== win) return;
     memoryWindows.delete(compId);
     memoryGuids.delete(compId);
+    // Whatever it had not saved went with it — the desk stops saying so.
+    relayToHost(compId, { kind: "closed" });
   });
   memoryWindows.set(compId, win);
   return true;
@@ -2268,13 +2270,32 @@ function registerIpc() {
   // On macOS that question waits for Squirrel to have the update
   // (`updater.readyToInstall`): asked first, its "go" stood — autosave
   // stopped — for as long as Squirrel took, and work done meanwhile was lost.
-  ipcMain.handle("updater:install", async () => {
+  //
+  // Restart pressed again while one is under way joins it: each press resuming
+  // on its own would install (or ask) once per press.
+  let restarting = null;
+  ipcMain.handle("updater:install", () => {
+    restarting ??= restartToUpdate().finally(() => (restarting = null));
+    return restarting;
+  });
+  async function restartToUpdate() {
+    let waited = false;
     const ready = await updater.readyToInstall({
-      onWait: () => sendToMain("updater:preparing"),
+      onWait: () => {
+        waited = true;
+        sendToMain("updater:preparing");
+      },
     });
     if (!ready) {
-      sendToMain("updater:install-failed");
+      // `blocked`: Squirrel has failed this download — Restart cannot help
+      // until it is fetched again (Check for Updates), and the toast says so.
+      sendToMain("updater:install-failed", { blocked: updater.installBlocked() }); // prettier-ignore
       return null;
+    }
+    // The "preparing" toast is over: the offer again, so a Cancel on the
+    // question below leaves the Restart it means rather than a stale wait.
+    if (waited) {
+      sendToMain("updater:downloaded", { version: updater.downloadedVersion() }); // prettier-ignore
     }
     if (closeGuard.allows() || !canAskRenderer(mainWindow)) {
       installUpdate();
@@ -2282,7 +2303,7 @@ function registerIpc() {
       askBeforeClose(mainWindow, { installing: true });
     }
     return null;
-  });
+  }
 
   // Projects: the session's project, and the one file it lives in. The
   // renderer holds the project — name, description, tabs, and every desktop's
@@ -2357,7 +2378,13 @@ function registerIpc() {
       err.code = "INVALID_ARG";
       throw err;
     }
-    store.writeRecovery(meta, target);
+    try {
+      store.writeRecovery(meta, target);
+    } catch (err) {
+      // Held, as for `project:save`: an answer, not an error string.
+      if (err?.code === "SLOT_HELD") return { ok: false, code: "slot-held" };
+      throw err;
+    }
     return { ok: true };
   });
   ipcMain.handle("project:recovery:clear", () => {

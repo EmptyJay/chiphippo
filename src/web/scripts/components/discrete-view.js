@@ -178,6 +178,21 @@ function canBox(def, rot) {
  * MOSFET's package, an inductor's holes between its leads.
  */
 export function discreteBox(ref, rot = 0, params = null) {
+  const box = unturnedBox(ref, rot, params);
+  // A body that turns a half lap about its middle hole (turnsHalfLap) covers
+  // the mirror of its box: a TO-92's round back, a TO-220's tab, now in front.
+  const def = partDef(ref);
+  if (!turnsHalfLap(def, params)) return box;
+  const pivot = halfLapPivot(def, params);
+  return {
+    minX: 2 * pivot.x - (box.minX + box.width),
+    minY: 2 * pivot.y - (box.minY + box.height),
+    width: box.width,
+    height: box.height,
+  };
+}
+
+function unturnedBox(ref, rot, params) {
   const def = partDef(ref);
   if (def?.can) return canBox(def, rot);
   if (def?.transistor && transistorCase(def, params) === "TO-220") {
@@ -1066,13 +1081,75 @@ export const TYPE_LABEL = Object.freeze({
   pmos: "PMOS",
 });
 
+/** The middle of a turned part's row of holes: what its body turns about. */
+const halfLapPivot = (def, params) => ({
+  x: footprintOffsets(def, params).at(-1) / 2,
+  y: 0,
+});
+
+/**
+ * Whether a part is drawn turned a half lap (`params.rot` 180): a
+ * transistor, a regulator, a potentiometer or a relay — holes in one row,
+ * `reversible` — whose BODY is not symmetric end for end, so turning it
+ * shows: a TO-92's flat face, a TO-220's tab, a trimmer's screw, a relay's
+ * block all swing to the other side of the row. (The resistor array turns
+ * too, but is drawn unturned: its body is symmetric, so only its pin-1 dot
+ * moves.)
+ */
+function turnsHalfLap(def, params) {
+  return (
+    params?.rot === 180 &&
+    def?.reversible === true &&
+    (Boolean(def.transistor) ||
+      Boolean(def.regulator) ||
+      Boolean(def.contacts) ||
+      def.id === "pot")
+  );
+}
+
+/** The font size of each class of text a turned body carries, pitch units —
+    the stylesheet's (app.css), unless the element was shrunk to fit. */
+const TEXT_SIZE = Object.freeze({
+  "part-transistor-pin": 0.3,
+  "part-transistor-label--to220": 0.42,
+  "part-transistor-label": 0.36,
+  "part-pot-label": 0.6,
+  "part-relay-label--small": 0.36,
+  "part-relay-label": 0.6,
+  "part-relay-pin": 0.26,
+});
+/** How much of a font size the capitals stand above the baseline. */
+const CAP_HEIGHT = 0.7;
+
+/**
+ * Turn a drawing a half lap about its middle hole, as the real part turns on
+ * the board — but leave every word upright where it lands (the pin letters
+ * and the printing are read, not looked at), each turned back about its own
+ * middle. The pin letters need no reordering: they turn with their pins.
+ */
+function turnHalfLap(svg, { x, y }) {
+  const turned = svgEl("g", {
+    class: "part-discrete-turned",
+    transform: `rotate(180 ${x} ${y})`,
+  });
+  while (svg.firstChild) turned.append(svg.firstChild);
+  for (const text of turned.querySelectorAll("text")) {
+    const cls = Object.keys(TEXT_SIZE).find((c) => text.classList.contains(c)); // prettier-ignore
+    const size = Number.parseFloat(text.style.fontSize) || TEXT_SIZE[cls] || 0;
+    const tx = Number(text.getAttribute("x"));
+    const middle = Number(text.getAttribute("y")) - (size * CAP_HEIGHT) / 2;
+    text.setAttribute("transform", `rotate(180 ${tx} ${middle})`);
+  }
+  svg.append(turned);
+}
+
 /**
  * A transistor (the discretes), in whichever package it is (`transistorCase`
  * — a MOSFET's Package property): a TO-92 or a TO-220, seen from above.
  *
  * Either way its face carries what the real one does — its part number (the
- * type, until it has one) and its pin letters in the order they sit, which a
- * turned part (`rot` 180) reverses — and a LAMP: lit while the transistor
+ * type, until it has one) and its pin letters over their pins — and a LAMP:
+ * lit while the transistor
  * conducts, ringed amber while a MOSFET is holding its last state
  * (DiscreteView.setChannel), with a `<title>` on the body saying which, in
  * words. Only the body takes the pointer, so the holes around it stay
@@ -1083,11 +1160,9 @@ function buildTransistor(svg, def, params) {
   else buildTo92(svg, def, params);
 }
 
-/** The pin letters in the order they sit, left to right. */
-const pinLetters = (def, params) => {
-  const names = def.pins.map((p) => p.name);
-  return params.rot === 180 ? [...names].reverse() : names;
-};
+/** The pin letters, pin 1's first: left to right as drawn, and a turned
+    part (turnHalfLap) carries each over to its pin. */
+const pinLetters = (def) => def.pins.map((p) => p.name);
 
 /**
  * The printing on a transistor's face, centred at (`x`, `y`): its part number
@@ -1112,7 +1187,7 @@ function transistorLabel(def, params, { x, y, size, room, modifier = "" }) {
 
 /** The pin letters, one at each `xs`, on the baseline `y`. */
 const pinLetterTexts = (def, params, xs, y) =>
-  pinLetters(def, params).map((name, i) => {
+  pinLetters(def).map((name, i) => {
     const pin = svgEl("text", {
       class: "part-transistor-pin",
       x: xs[i],
@@ -1227,11 +1302,11 @@ function buildTo220(svg, def, params) {
   );
 }
 
-/** A regulator's pin marks, left to right as `def.pins` runs: its pins'
-    initials — I G O, or A O I — where a TO-220's face has room for one
-    letter a leg. */
-const regulatorMarks = (def, params) =>
-  pinLetters(def, params).map((name) => name[0]);
+/** A regulator's pin marks, left to right on its face: its pins' initials —
+    I G O, or A O I — where a TO-220's face has room for one letter a leg. A
+    turned one (`rot` 180) turns its whole body (turnHalfLap), letters and
+    all, so they read O G I from the front. */
+const regulatorMarks = (def) => pinLetters(def).map((name) => name[0]);
 
 /**
  * A linear regulator in its TO-220 (buildTo220's package): its part number
@@ -1258,7 +1333,7 @@ function buildRegulator(svg, def, params) {
     ),
     svgEl("rect", { class: "part-to220-body", x: left, y: mould, width, height: front - mould, rx: 0.06 }), // prettier-ignore
     label,
-    ...regulatorMarks(def, params).map((mark, i) => {
+    ...regulatorMarks(def).map((mark, i) => {
       const text = svgEl("text", { class: "part-transistor-pin", x: i, y: front - 0.11, "text-anchor": "middle" }); // prettier-ignore
       text.textContent = mark;
       return text;
@@ -1917,10 +1992,13 @@ export function buildDiscreteSvg(ref, params = {}) {
     if (value) svg.append(value);
   } else if (def.transistor) {
     buildTransistor(svg, def, normalized);
+    if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
   } else if (def.regulator) {
     buildRegulator(svg, def, normalized);
+    if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
   } else if (def.contacts) {
     buildRelay(svg, def, normalized);
+    if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
   } else if (ref === "seg8cc" || ref === "seg8ca") {
     buildDigitDisplay(svg, normalized.color);
   } else if (ref === "bar8") {
@@ -1935,6 +2013,7 @@ export function buildDiscreteSvg(ref, params = {}) {
     buildResistorNetwork(svg, normalized.ohms, normalized.rot);
   } else if (ref === "pot") {
     buildPotentiometer(svg, normalized);
+    if (turnsHalfLap(def, normalized)) turnHalfLap(svg, halfLapPivot(def, normalized)); // prettier-ignore
   } else if (def.switchBank) {
     buildDipSwitchBank(svg, def, normalized);
   } else {

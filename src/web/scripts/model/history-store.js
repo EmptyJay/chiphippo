@@ -160,6 +160,26 @@ export class HistoryStore {
     return dropped;
   }
 
+  /** The present entry's snapshot (read-only), or null while empty. */
+  get present() {
+    return this.#entries[this.#index]?.snapshot ?? null;
+  }
+
+  /**
+   * Rewrite the present entry's snapshot and every one in the redo future
+   * with `fn(snapshot)` (null keeps one as it is) — no undo step added, none
+   * dropped. For a fact about the document's state from now on that arrived
+   * while it was off the desk (a ROM's file written: `markRomKept`); the past
+   * is left as it was.
+   */
+  syncForward(fn) {
+    if (this.#index < 0) return;
+    for (let i = this.#index; i < this.#entries.length; i++) {
+      const next = fn(this.#entries[i].snapshot);
+      if (next) this.#entries[i].snapshot = next;
+    }
+  }
+
   /** Every currently-retained snapshot (past + present + future), read-only. */
   snapshots() {
     return this.#entries.map((e) => e.snapshot);

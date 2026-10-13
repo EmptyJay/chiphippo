@@ -40,6 +40,7 @@
 // same desk twice writes the same bytes — and re-exporting into a folder with
 // a laid-out board keeps every footprint linked to its symbol.
 
+import { chipMarking } from "../../catalog/index.js";
 import { exportNetlist } from "./export-netlist.js";
 import { KICAD_LEFT_OUT, kicadPart, kicadMapped } from "./kicad-parts.js";
 import {
@@ -417,7 +418,11 @@ function symbolFields(sym, parts, kp, prefix) {
   return {
     prefix,
     reference: part ? part.designator.replace(/\d+$/, "") : "U",
-    value: part ? (part.def.kind === "chip" ? part.def.id : k.value) : sym.name,
+    value: part
+      ? part.def.kind === "chip"
+        ? chipMarking(part.def)
+        : k.value
+      : sym.name,
     footprint: k?.footprint ?? "",
     description: part?.def.title ?? "",
   };
@@ -642,7 +647,8 @@ function buildReport(model, kp, report) {
       continue;
     }
     if (part.def.kind === "clock") add("changed", "clockConnector", part);
-    if (kp.get(part.id)?.generic) add("footprint", "genericFootprint", part);
+    const generic = kp.get(part.id)?.generic;
+    if (generic) add("footprint", generic, part);
     if (kp.get(part.id)?.pinOrder) add("footprint", "transistorPinout", part);
     if (kp.get(part.id)?.nearest) add("footprint", "nearestFootprint", part);
   }

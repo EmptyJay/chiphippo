@@ -157,10 +157,10 @@ it is where the data came from but no longer what the chip holds.</p>
 simulation is stopped) — see <a href="simulation.html">Running a Simulation</a>.</p>
 <h2 id="the-memory-inspector">The memory inspector</h2>
 <p>Every memory chip — SRAM or ROM alike — has a floating <strong>inspector</strong>
-window: right-click it on the desk, choose <strong>Properties…</strong>, then
-<strong>Inspect memory…</strong>. It&#39;s a hex/ASCII grid, one row per 16 bytes, with a
-toolbar for <strong>Go to</strong> (jump to an address), <strong>Fill</strong> (write a byte value
-across a start/end range), <strong>Save</strong>, and Import/Export.</p>
+window: right-click it on the desk and choose <strong>Inspect Memory</strong>. It&#39;s a
+hex/ASCII grid, one row per 16 bytes, with a toolbar for <strong>Go to</strong> (jump to
+an address), <strong>Fill</strong> (write a byte value across a start/end range),
+<strong>Save</strong>, and Import/Export.</p>
 <p><img src="images/memory-inspector.png" alt="The memory inspector showing a ROM&#39;s contents"></p>
 <p>What you can do depends on whether the simulation is running and what kind
 of chip it is:</p>
@@ -175,7 +175,10 @@ if you last clicked the ASCII column, the character does).
 <strong>Enter</strong> stops where you are, writing a single digit as that value;
 <strong>Escape</strong>, or clicking away with only one digit typed, abandons the byte.
 <strong>Save</strong> writes your edits back to the chip&#39;s file and flags it
-<strong>programmed</strong>, exactly like using the external programmer.</li>
+<strong>programmed</strong>, exactly like using the external programmer. Until you
+save, the chip on the desk wears a warning triangle that says <strong>Edited, not
+saved</strong>: the circuit reads the chip&#39;s file, which doesn&#39;t have your edits
+yet. Closing the inspector without saving discards them.</li>
 <li><strong>Stopped, SRAM</strong> — shows the chip&#39;s last contents from before it was
 stopped (or noise, if it&#39;s never been run) as a read-only snapshot; there&#39;s
 nothing to save, since SRAM has no file.</li>

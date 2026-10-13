@@ -298,6 +298,7 @@
       "availableVersion": "版本 {version} 可用 — 正在后台下载…",
       "ready": "更新已准备好安装。",
       "readyVersion": "版本 {version} 已准备好安装。",
+      "preparing": "正在准备更新——准备就绪后 Chip Hippo 将立即重新启动。",
       "upToDate": "你使用的已是 Chip Hippo 的最新版本。",
       "storeBuild": "更新通过 App Store 发布。",
       "devBuild": "更新仅在已安装的版本中可用。",
@@ -1206,7 +1207,8 @@
       "deleteSignal": "删除信号",
       "openChipDesigner": "在芯片设计器中打开",
       "breakOnSettled": "稳定时中断",
-      "openCpuMonitor": "打开 CPU 监视器"
+      "openCpuMonitor": "打开 CPU 监视器",
+      "inspectMemory": "查看存储器"
     },
     "remove": {
       "confirm": "移除",
@@ -1283,6 +1285,9 @@
     "failOpen": "无法打开项目",
     "failSave": "无法保存项目",
     "slotHeld": "无法读取上次会话中未保存的项目，因此它保留在本项目原本的保存位置。请使用“另存为”为本项目指定单独的文件。",
+    "slotUnreadTitle": "无法读取上次会话的工作",
+    "slotAside": "无法读取上次会话保留的项目。它已原样移至 {path}，可通过“文件 ▸ 打开”访问。",
+    "slotLeft": "无法读取也无法移动上次会话保留的项目，因此它留在 {path}，下次启动时会再次尝试。在此之前，没有自己文件的项目只能通过“另存为”保存。",
     "failClose": "无法检查未保存的更改 — 请在退出前保存您的工作",
     "failLocation": "无法选择保存位置",
     "failDuplicate": "无法复制该桌面",
@@ -1318,6 +1323,7 @@
       "unmapped": "{format} 中没有可替代它的元件",
       "clockConnector": "变为 CLOCK IN 连接器——电路板上此处需要一个振荡器",
       "genericFootprint": "使用排针封装——请选择实际元件的封装",
+      "pushButtonFootprint": "使用 6 mm 轻触开关封装（仅尺寸相符）——请选择实际元件的封装",
       "resistorMerged": "变为一根导线：逻辑仿真器中没有电阻",
       "momentary": "变为拨动开关：Digital 没有瞬时触点",
       "unpowered": "在 Digital 中会被供电，因为它无法仿真未供电的芯片",
@@ -1458,6 +1464,7 @@
     "checkFailed": "检查更新失败",
     "installFailed": "未安装更新",
     "installFailedMessage": "现在无法安装更新，因此 Chip Hippo 仍以此版本保持打开。按“重启”可再试一次。",
+    "installBlockedMessage": "macOS 无法将更新准备好以供安装，因此 Chip Hippo 仍以此版本保持打开。请检查更新以重新下载，或从 chiphippo.com 获取。",
     "preparing": "正在准备更新",
     "preparingMessage": "更新准备就绪后，Chip Hippo 将以新版本重启，重启前会询问未保存的工作。在此期间可以继续工作。"
   },
@@ -1623,7 +1630,6 @@
       "sine": "正弦波"
     },
     "action": {
-      "inspectMemory": "查看存储器…",
       "programMemory": "载入映像…（编程）",
       "manageConnections": "管理连接…"
     },
@@ -1634,6 +1640,7 @@
       "reversed": "电源接反 — VCC 与 GND 接反了。",
       "damaged": "已损坏 — {volts} V 超过了该元件的额定 {rating}，让它冒了烟。停止仿真即可恢复。",
       "unprogrammed": "未编程 — 尚未载入映像，因此该芯片读出的是随机噪声。",
+      "unsaved": "已编辑，未保存——存储器检查器中有此芯片文件尚未包含的更改。请在检查器中保存以保留这些更改。",
       "timing": "无法识别定时接法 — {problems}。在按数据手册接线之前，其输出保持静止状态。",
       "heldOn": "保持导通 — 栅极没有电平，残留的电荷使沟道保持导通。真实的栅极会漏掉这些电荷，请用电阻把它接到确定的电平。",
       "heldOff": "保持关断 — 栅极没有电平，因此保持最后一次被驱动时的状态（若栅极尚未被驱动过则为关断）。真实的栅极会漂移，请用电阻把它接到确定的电平。",

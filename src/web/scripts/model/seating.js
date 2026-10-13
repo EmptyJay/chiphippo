@@ -31,7 +31,15 @@
 // question (canPlacePart), not this module's.
 
 import { footprintOffsets, partDef } from "../catalog/index.js";
-import { dipRows, packageSpec, seatRow } from "./footprints.js";
+import {
+  dipRows,
+  isWidePackage,
+  packageSpec,
+  seatedRows,
+  seatRow,
+  seatsWide,
+  WIDE_SEAT_ROWS,
+} from "./footprints.js";
 import {
   boardSize,
   clampColumn,
@@ -54,20 +62,91 @@ export const SEAT_BAND = 2.5;
     and the body's edge — chip-view.js `chipBox`), in pitch units. */
 const LEG_REACH = 0.6;
 
+/** A row's y in a strip's own frame (every column shares it), or null. */
+function rowY(type, row) {
+  return holePosition(type, `${row}1`)?.y ?? null;
+}
+
+/** The y halfway between a seat's two pin rows — the middle of the chip. */
+function seatMiddle(type, rows) {
+  const lower = rowY(type, rows.lower);
+  const upper = rowY(type, rows.upper);
+  return lower == null || upper == null ? null : (lower + upper) / 2;
+}
+
 /**
- * The band a chip seats from: SEAT_BAND, or — for a seat wider than it, a
- * 600-mil part at its true width (rows d and h, the upper row 3.5 pitch from
- * the trench's centre) — every point the chip itself is drawn over, so it can
- * be picked up by any part of it and dragged.
+ * Does a chip in this seat seat from a pointer at `y`? Anywhere it is DRAWN
+ * over (its two pin rows and the legs past them), so it can be picked up by
+ * any part of it and dragged — and, however narrow it is, anywhere within
+ * SEAT_BAND of the trench, so a ghost snaps onto the trench from a band away.
  */
-function seatBand(type, rows) {
-  let band = SEAT_BAND;
-  for (const row of [rows.lower, rows.upper]) {
-    const pos = holePosition(type, `${row}1`);
-    const off = pos ? trenchOffset(type, pos.y) : null;
-    if (off != null) band = Math.max(band, off + LEG_REACH);
+function seatsFrom(type, rows, y) {
+  const lower = rowY(type, rows.lower);
+  const upper = rowY(type, rows.upper);
+  if (lower == null || upper == null) return false;
+  const top = Math.min(lower, upper) - LEG_REACH;
+  const bottom = Math.max(lower, upper) + LEG_REACH;
+  return (y >= top && y <= bottom) || trenchOffset(type, y) <= SEAT_BAND;
+}
+
+/**
+ * The seats a package may take when it is placed or moved on its own, the one
+ * it takes with nothing to choose between them first: e/f for a 300-mil
+ * package; for a 600-mil one every pair of rows six pitches apart across the
+ * trench — d/h, then c/g, e/i and b/f (footprints.js `WIDE_SEAT_ROWS`).
+ * @returns {Array<{ row: string, wide: boolean, rows: object }>}
+ */
+function freshSeats(pkg) {
+  const first = seatRow(pkg);
+  if (!isWidePackage(pkg)) {
+    return [{ row: first, wide: false, rows: dipRows(pkg, first) }];
   }
-  return band;
+  const rows = [first, ...WIDE_SEAT_ROWS.filter((r) => r !== first)];
+  return rows.map((row) => ({
+    row,
+    wide: true,
+    rows: dipRows(pkg, row, true),
+  }));
+}
+
+/**
+ * The seat a DIP takes for a pointer at `y`: the one whose MIDDLE is nearest
+ * `y - grabDy` — the cursor for a ghost (which is drawn centred on it), the
+ * point the grab started from for a drag (so a chip picked up by its top edge
+ * does not jump a seat on the first move). Ties go to the earlier seat.
+ */
+function nearestSeat(type, pkg, y, grabDy) {
+  const target = y - grabDy;
+  let best = null;
+  let bestGap = Infinity;
+  for (const seat of freshSeats(pkg)) {
+    const middle = seatMiddle(type, seat.rows);
+    if (middle == null) continue;
+    const gap = Math.abs(middle - target);
+    if (gap < bestGap - 1e-9) {
+      best = seat;
+      bestGap = gap;
+    }
+  }
+  return best;
+}
+
+/**
+ * How far below the middle of its seat (world units, + downward) a point on a
+ * seated chip is — what a drag that begins there passes as `grabDy`, so the
+ * chip moves between seats by the pointer's travel rather than its position.
+ * 0 for anything that is not a seated DIP.
+ * @param {Array<{id:string,type:string,y:number}>} boards
+ * @param {{ref:string, board:string, anchor:string, params?:object}} comp
+ * @param {{x:number,y:number}} world
+ */
+export function seatGrabDy(boards, comp, world) {
+  const pkg = partDef(comp?.ref)?.package;
+  const board = (boards ?? []).find((b) => b.id === comp?.board);
+  if (!pkg || !board) return 0;
+  const rows = seatedRows(pkg, comp.anchor, comp.params);
+  const middle = rows ? seatMiddle(board.type, rows) : null;
+  return middle == null ? 0 : world.y - (board.y + middle);
 }
 
 /** How far the cursor may sit from a grid row and still seat a discrete on it. */
@@ -91,10 +170,14 @@ export const ROW_BAND = 0.8;
  * @param {{rot?:number}|null} [params] - a `def.can` part's current
  *   quarter-turn, and a linear part's size where it has one (an inductor's
  *   holes between its leads — catalog/index.js `footprintOffsets`).
- * @param {{chipRow?:string}} [opts] - `chipRow` seats a DIP with pin 1 in
- *   THAT row rather than the one its package is placed in now (`seatRow`): a
- *   chip carried in a rigid group keeps the width it has — see cluster-move.js.
- * @returns {{board:string, anchor:string}|null}
+ *   A DIP's params say whether row e is its wide e/i seat (`seatsWide`).
+ * @param {{chipRow?:string, grabDy?:number}} [opts] - `chipRow` seats a DIP
+ *   with pin 1 in THAT row (and `params`' e/i marker) rather than the seat
+ *   nearest the pointer: a chip carried in a rigid group keeps the seat it has
+ *   — see cluster-move.js. `grabDy` is a drag's `seatGrabDy`.
+ * @returns {{board:string, anchor:string, wide?:boolean}|null} — `wide` for a
+ *   600-mil DIP: whether the seat is the e/i one (footprints.js `withSeat`
+ *   writes it into the chip's params).
  */
 export function partSeatAt(
   boards,
@@ -102,7 +185,7 @@ export function partSeatAt(
   world,
   grabOffsetCols = 0,
   params = null,
-  { chipRow = null } = {},
+  { chipRow = null, grabDy = 0 } = {},
 ) {
   const def = partDef(ref);
   if (!def) return null;
@@ -112,7 +195,11 @@ export function partSeatAt(
     const seat = def.can
       ? canSeat(board, def, local, grabOffsetCols, params?.rot ?? 0)
       : def.package
-        ? chipSeat(board, def.package, local, grabOffsetCols, chipRow)
+        ? chipSeat(board, def.package, local, grabOffsetCols, {
+            chipRow,
+            wide: seatsWide(params),
+            grabDy,
+          })
         : discreteSeat(board, def, local, grabOffsetCols, params);
     if (seat) return seat;
   }
@@ -139,26 +226,37 @@ function localPoint(board, world) {
 }
 
 /**
- * A DIP straddles the trench: pin 1 in row e for a 300-mil package, row d for a
- * 600-mil one at its true width (footprints.js `seatRow`) — its pins then in
- * rows d and h, six pitches apart. `chipRow` asks for another row the package
- * can anchor in (`dipRows`); one it cannot seats nowhere.
+ * A DIP straddles the trench: pin 1 in row e for a 300-mil package; a 600-mil
+ * one at its true width, its pins six pitches apart in whichever of rows
+ * b/f, c/g, d/h and e/i the pointer is nearest (`nearestSeat`). `chipRow`
+ * (with `wide`, the e/i marker) asks for one seat instead; a row the package
+ * cannot anchor in seats nowhere.
  */
-function chipSeat(board, pkg, local, grabOffsetCols, chipRow = null) {
+function chipSeat(
+  board,
+  pkg,
+  local,
+  grabOffsetCols,
+  { chipRow, wide, grabDy },
+) {
   const { halfPins } = packageSpec(pkg);
-  const row = chipRow ?? seatRow(pkg);
-  const rows = dipRows(pkg, row);
-  if (!rows) return null;
   // Rails carry no trench at all — nothing can straddle them.
-  const offset = trenchOffset(board.type, local.y);
-  if (offset == null || offset > seatBand(board.type, rows)) return null;
+  if (trenchOffset(board.type, local.y) == null) return null;
+  const seat =
+    chipRow != null
+      ? { row: chipRow, wide, rows: dipRows(pkg, chipRow, wide) }
+      : nearestSeat(board.type, pkg, local.y, grabDy);
+  if (!seat?.rows || !seatsFrom(board.type, seat.rows, local.y)) return null;
   const cursorCol = columnAt(board.type, local.x);
   const col =
     grabOffsetCols === 0
       ? cursorCol - (halfPins - 1) / 2 // ghost: chip centred on the cursor
       : cursorCol + grabOffsetCols; // drag: keep the grab point
   const anchor = clampColumn(board.type, col, halfPins - 1);
-  return anchor == null ? null : { board: board.id, anchor: `${row}${anchor}` };
+  if (anchor == null) return null;
+  const at = { board: board.id, anchor: `${seat.row}${anchor}` };
+  // Only a 600-mil package has an e/i seat to say yes or no to.
+  return isWidePackage(pkg) ? { ...at, wide: seat.row === "e" && seat.wide } : at; // prettier-ignore
 }
 
 /** A discrete lies along ONE grid row — whichever row the cursor is nearest. */

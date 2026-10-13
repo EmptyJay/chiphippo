@@ -26,13 +26,13 @@
 // Local SVG coordinates are pitch units with the ORIGIN AT PIN 1's hole (the
 // component anchor), and the upper row of pins `span` pitches above it: 3 for a
 // 300-mil part (rows e and f, straight across the trench), 6 for a 600-mil one
-// at its true width (rows d and h — footprints.js `dipRows`). Whole pitches by
-// design: one per row, three across the channel.
+// at its true width (rows b/f, c/g, d/h or e/i — footprints.js `dipRows`).
+// Whole pitches by design: one per row, three across the channel.
 
 import { el, svgEl } from "../dom.js";
 import { PX_PER_UNIT } from "../desk/desk-geometry.js";
 import { holePosition } from "../model/breadboard.js";
-import { dipRows, packageSpec } from "../model/footprints.js";
+import { dipRows, packageSpec, seatsWide } from "../model/footprints.js";
 import { chipDef, chipMarking } from "../catalog/index.js";
 import { isRomChip, isTimed } from "../sim/chip-eval.js";
 import {
@@ -62,23 +62,25 @@ const BURNS = Object.freeze(["reversed", "damaged", "overloaded"]);
 /**
  * The pitches between a chip's two rows of pins, read off its ANCHOR: the row
  * pin 1 is in says which seat it has (a 600-mil part anchored in row e kept the
- * narrow seat an older desk gave it). With no anchor — a ghost not yet over a
- * board — it is the seat the part will be PLACED in.
+ * narrow seat an older desk gave it — unless `wide` says it is the e/i seat).
+ * With no anchor — a ghost not yet over a board — it is the seat the part will
+ * be PLACED in.
  * @param {string} pkg
  * @param {string|null} [anchor] - pin 1's hole id, e.g. "d12" — or just its
  *   row ("d"), which is all this reads
+ * @param {boolean} [wide] - the e/i seat's marker (footprints.js `seatsWide`)
  * @returns {number} 3 or 6
  */
-export function chipSpan(pkg, anchor = null) {
+export function chipSpan(pkg, anchor = null, wide = false) {
   const row = typeof anchor === "string" ? anchor[0] : undefined;
-  return (dipRows(pkg, row) ?? dipRows(pkg)).span;
+  return (dipRows(pkg, row, wide) ?? dipRows(pkg)).span;
 }
 
 /** Footprint-box geometry shared by the builder and the ghost/controller —
     for a chip seated at `anchor` (see `chipSpan`). */
-export function chipBox(pkg, anchor = null) {
+export function chipBox(pkg, anchor = null, wide = false) {
   const { halfPins } = packageSpec(pkg);
-  const span = chipSpan(pkg, anchor);
+  const span = chipSpan(pkg, anchor, wide);
   // x spans the pin columns ± body overhang; y spans the upper row → the
   // lower (anchor) row ± legs.
   return {
@@ -116,9 +118,9 @@ const LEG_WIDTH = 0.28;
  * The legs need no allowance of their own: each one stands in its own pin's
  * hole, and a hole with a pin in it is already spoken for.
  */
-export function chipBodyBox(pkg, anchor = null) {
+export function chipBodyBox(pkg, anchor = null, wide = false) {
   const { halfPins } = packageSpec(pkg);
-  const top = bodyTop(chipSpan(pkg, anchor));
+  const top = bodyTop(chipSpan(pkg, anchor, wide));
   return {
     minX: -0.6,
     minY: top,
@@ -144,8 +146,9 @@ export function buildChipSvg(ref, params = {}, anchor = null) {
     throw err;
   }
   const { halfPins } = packageSpec(def.package);
-  const span = chipSpan(def.package, anchor);
-  const box = chipBox(def.package, anchor);
+  const wide = seatsWide(params);
+  const span = chipSpan(def.package, anchor, wide);
+  const box = chipBox(def.package, anchor, wide);
   const top = bodyTop(span);
   const mid = -span / 2; // halfway between the two pin rows
 
@@ -322,6 +325,7 @@ export class ChipView {
   #status = null; // last engine-reported power/health status (Feature 90)
   #volts = null; // …and the supply volts the engine saw (Feature 400)
   #unprogrammed = false; // a ROM/EPROM/EEPROM with no image loaded (Feature 190)
+  #unsaved = false; // its inspector holds edits not yet saved to its file
   #timing = null; // a timed part's reading of its own R and C, while running
 
   /**
@@ -414,16 +418,22 @@ export class ChipView {
    * desk seated narrow takes its true width the moment it is moved, and the
    * live drag shows it doing so.
    * @param {{type:string,x:number,y:number}} board
-   * @param {string} anchor - pin 1's hole id (row e, or d at 600-mil width)
+   * @param {string} anchor - pin 1's hole id (row e, or b–e at 600-mil width)
+   * @param {object} [params] - the params the seat comes with, when it brings
+   *   its own (a drag into or out of the e/i seat — footprints.js `withSeat`)
    */
-  updatePlacement(board, anchor) {
+  updatePlacement(board, anchor, params = this.#params) {
     const pos = holePosition(board.type, anchor, board.rot ?? 0);
     if (!pos) return; // defensive: never seat a view on a phantom hole
     const pkg = chipDef(this.#ref).package;
-    const widthChanged = chipSpan(pkg, anchor) !== chipSpan(pkg, this.#anchor);
+    const wide = seatsWide(params);
+    const widthChanged =
+      chipSpan(pkg, anchor, wide) !==
+      chipSpan(pkg, this.#anchor, seatsWide(this.#params));
     this.#anchor = anchor;
+    this.#params = params ?? {};
     if (widthChanged) this.#rebuild();
-    const box = chipBox(pkg, anchor);
+    const box = chipBox(pkg, anchor, wide);
     this.#el.style.left = `${(board.x + pos.x + box.minX) * PX_PER_UNIT}px`;
     this.#el.style.top = `${(board.y + pos.y + box.minY) * PX_PER_UNIT}px`;
   }
@@ -466,6 +476,9 @@ export class ChipView {
       "part-chip--unprogrammed",
       this.#unprogrammed && !burning,
     );
+    // Edits not yet saved share the triangle, and speak before "not
+    // programmed": they are what Save is waiting on.
+    this.#el.classList.toggle("part-chip--unsaved", this.#unsaved && !burning);
     // A timed part that cannot read its own R and C shares the triangle; a
     // power fault (which stops it computing at all) speaks first.
     const fault = FAULTS.includes(this.#status);
@@ -479,8 +492,20 @@ export class ChipView {
         (timingProblems.length
           ? statusHint("timing", { ...about, problems: timingProblems })
           : "") ||
+        (this.#unsaved ? statusHint("unsaved", about) : "") ||
         (this.#unprogrammed ? statusHint("unprogrammed", about) : "");
     }
+  }
+
+  /**
+   * Its memory inspector holds edits the chip's file has not got yet ("edited,
+   * not saved"): the circuit reads the file, so until Save they are not in it.
+   * @param {boolean} on
+   */
+  setUnsaved(on) {
+    if (this.#unsaved === on) return;
+    this.#unsaved = on;
+    this.#refresh();
   }
 
   /**

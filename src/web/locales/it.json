@@ -298,6 +298,7 @@
       "availableVersion": "La versione {version} è disponibile — scaricamento in background…",
       "ready": "L'aggiornamento è pronto da installare.",
       "readyVersion": "La versione {version} è pronta da installare.",
+      "preparing": "Preparazione dell'aggiornamento: Chip Hippo si riavvia appena è pronto.",
       "upToDate": "Stai usando l'ultima versione di Chip Hippo.",
       "storeBuild": "Gli aggiornamenti arrivano tramite l'App Store.",
       "devBuild": "Gli aggiornamenti sono disponibili solo nelle versioni installate.",
@@ -1224,7 +1225,8 @@
       "deleteSignal": "Elimina il segnale",
       "openChipDesigner": "Apri nell'editor di chip",
       "breakOnSettled": "Interrompi alla stabilizzazione",
-      "openCpuMonitor": "Apri il monitor CPU"
+      "openCpuMonitor": "Apri il monitor CPU",
+      "inspectMemory": "Ispeziona la memoria"
     },
     "remove": {
       "confirm": "Rimuovi",
@@ -1302,6 +1304,9 @@
     "failOpen": "Non è stato possibile aprire il progetto",
     "failSave": "Non è stato possibile salvare il progetto",
     "slotHeld": "Non è stato possibile leggere il progetto non salvato dell'ultima sessione, quindi viene conservato dove verrebbe salvato questo. Usa Salva con nome per dare a questo progetto un file tutto suo.",
+    "slotUnreadTitle": "Non è stato possibile leggere il lavoro dell'ultima sessione",
+    "slotAside": "Non è stato possibile leggere il progetto conservato dall'ultima sessione. È stato spostato, senza modifiche, in {path}, dove File ▸ Apri può raggiungerlo.",
+    "slotLeft": "Non è stato possibile né leggere né spostare il progetto conservato dall'ultima sessione, quindi resta in {path} perché il prossimo avvio ci riprovi. Fino ad allora, un progetto senza un file proprio si può salvare solo con Salva con nome.",
     "failClose": "Non è stato possibile verificare le modifiche non salvate: salva il lavoro prima di uscire",
     "failLocation": "Non è stato possibile scegliere una posizione",
     "failDuplicate": "Non è stato possibile duplicare la scrivania",
@@ -1340,6 +1345,7 @@
       "unmapped": "{format} non ha nulla da mettere al suo posto",
       "clockConnector": "diventa un connettore CLOCK IN: su una scheda lì serve un oscillatore",
       "genericFootprint": "riceve un footprint a pettine: scegli quello del componente reale",
+      "pushButtonFootprint": "riceve il footprint di un pulsante da 6 mm, solo per le dimensioni: scegli quello del componente reale",
       "resistorMerged": "diventa un filo: un simulatore logico non ha resistenze",
       "momentary": "diventa un interruttore: Digital non ha contatti momentanei",
       "unpowered": "viene alimentato in Digital, che non può simulare un chip non alimentato",
@@ -1488,6 +1494,7 @@
     "checkFailed": "Ricerca di aggiornamenti fallita",
     "installFailed": "Aggiornamento non installato",
     "installFailedMessage": "Non è stato possibile installare l'aggiornamento ora, quindi Chip Hippo resta aperto in questa versione. Premi Riavvia per riprovare.",
+    "installBlockedMessage": "macOS non è riuscito a preparare l'aggiornamento per l'installazione, quindi Chip Hippo resta aperto in questa versione. Cerca aggiornamenti per scaricarlo di nuovo, oppure scaricalo da chiphippo.com.",
     "preparing": "Preparazione dell'aggiornamento",
     "preparingMessage": "Chip Hippo si riavvierà con la nuova versione appena sarà pronta, chiedendo prima del lavoro non salvato. Nel frattempo puoi continuare a lavorare."
   },
@@ -1653,7 +1660,6 @@
       "sine": "Sinusoidale"
     },
     "action": {
-      "inspectMemory": "Ispeziona la memoria…",
       "programMemory": "Carica un'immagine… (programma)",
       "manageConnections": "Gestisci connessioni…"
     },
@@ -1664,6 +1670,7 @@
       "reversed": "Alimentazione invertita — VCC e GND sono scambiati.",
       "damaged": "Danneggiato — {volts} V superano i {rating} di questo componente e hanno fatto uscire il fumo. Fermando la simulazione viene ripristinato.",
       "unprogrammed": "Non programmato — non è caricata nessuna immagine, quindi questo chip legge rumore casuale.",
+      "unsaved": "Modificato, non salvato — l'ispettore di memoria ha modifiche che il file di questo chip non ha ancora. Salva nell'ispettore per conservarle.",
       "timing": "Temporizzazione non riconosciuta — {problems}. Le uscite restano a riposo finché non è collegato come mostra il datasheet.",
       "heldOn": "Mantiene ACCESO — il gate non ha alcun livello, e la carica rimasta lo tiene in conduzione. Un gate reale perde quella carica: collegalo a un livello definito con una resistenza.",
       "heldOff": "Mantiene SPENTO — il gate non ha alcun livello, quindi resta com'era all'ultimo comando (spento, se il gate non è ancora stato pilotato). Un gate reale deriva: collegalo a un livello definito con una resistenza.",

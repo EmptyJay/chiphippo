@@ -229,6 +229,9 @@ export const KICAD_PARTS = Object.freeze({
     footprint: "Button_Switch_THT:SW_PUSH_6mm",
     shape: "spst",
     generic: true, // a LATCHING button; the tactile footprint is only its size
+    // …and the report must say which stand-in it is: every other generic
+    // footprint is a pin header, which this is not.
+    genericCode: "pushButtonFootprint",
     value: () => "Push (latching)",
   },
   "sw-dip1": {
@@ -349,11 +352,14 @@ export function kicadMapped(def) {
 /**
  * Everything the writer needs about one part. `fields` are the extra
  * (hidden) properties its symbol instance carries — an MPN, for a part with a
- * part number; `pinOrder` marks a footprint whose pad order is the desk's
+ * part number; `generic` is the report code of a stand-in footprint (a pin
+ * header's `genericFootprint`, unless the spec names its own), or false;
+ * `pinOrder` marks a footprint whose pad order is the desk's
  * generic one, to be checked against the real part; `nearest` one that is
  * only the library's closest match.
  * @param {object} part - an ExportPart (export-netlist.js).
- * @returns {{ footprint:string, shape:string, value:string, generic:boolean,
+ * @returns {{ footprint:string, shape:string, value:string,
+ *   generic:string|false,
  *   pinOrder:boolean, nearest:boolean, fields:Array<[string,string]>,
  *   pad:(key:string) => string }}
  */
@@ -381,7 +387,8 @@ export function kicadPart(part) {
         : spec.footprint,
     shape: spec.shape,
     value: spec.value ? spec.value(comp) : def.id,
-    generic: spec.generic === true,
+    generic:
+      spec.generic === true ? (spec.genericCode ?? "genericFootprint") : false,
     pinOrder: spec.pinOrder === true,
     nearest: spec.nearest?.(comp) === true,
     fields: partNumber ? [["MPN", partNumber]] : [],

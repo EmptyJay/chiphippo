@@ -40,6 +40,8 @@ import { q } from "./sexpr.js";
 export const PITCH = 2.54;
 export const GRID = 1.27;
 const PIN_LEN = 2.54;
+/** How far inside the body a pin's name starts, from the pin's root. */
+export const PIN_NAME_OFFSET = 1.016;
 /** A rough stroke-font advance per character at 1.27 mm, for sizing boxes. */
 export const CHAR_W = 1.1;
 
@@ -169,14 +171,21 @@ const poly = (points, fillType = "none", width = 0.254) => [
 /**
  * A labelled box with pins on its four sides. The Value (the part number)
  * sits IN the box, centred, the way the Schematic view labels a chip — so the
- * box is made wide enough for it between the two columns of pin names, and
- * the Reference sits above its top-left corner, clear of a centred VCC pin.
+ * box is made wide enough for it between the two columns of pin names, tall
+ * enough for it between the top and bottom pins' names (which read down into
+ * the body: a 6-pin chip's VCC and GND met in the middle of a box sized by its
+ * three rows alone), and the Reference sits above its top-left corner, clear
+ * of a centred VCC pin.
  */
 function boxSymbol(name, sides, valueWidth) {
   const rows = Math.max(sides.left.length, sides.right.length, 1);
-  const h = (rows + 1) * PITCH;
   const width = (list) =>
     Math.max(0, ...list.filter(Boolean).map((p) => textWidth(p.name)));
+  const reach = Math.max(width(sides.top), width(sides.bottom));
+  const h = Math.max(
+    (rows + 1) * PITCH,
+    reach ? up(2 * (PIN_NAME_OFFSET + reach + GRID), PITCH) : 0,
+  );
   const leftW = width(sides.left);
   const rightW = width(sides.right);
   const across = Math.max(sides.top.length, sides.bottom.length);
@@ -762,7 +771,7 @@ export function symbolNode(
           ["pin_numbers", "hide"],
           ["pin_names", ["offset", 0], "hide"],
         ]
-      : [["pin_names", ["offset", 1.016]]]),
+      : [["pin_names", ["offset", PIN_NAME_OFFSET]]]),
     ["exclude_from_sim", "no"],
     ["in_bom", "yes"],
     ["on_board", "yes"],

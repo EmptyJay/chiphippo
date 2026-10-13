@@ -263,19 +263,75 @@ test("a potentiometer is its sides: a pull, or at the end of its track a wire", 
   assert.equal(end.pulledDown, false);
 });
 
-test("an unconnected chip input is tied HIGH right on its pin", () => {
+/** Where a pull's far end is: two grid units the way its rotation points. */
+function pullTip(el) {
+  const r = Number(el.attr("rotation")?.getAttribute("rotation") ?? 0);
+  const dirs =
+    el.name === "PullUp"
+      ? [[0, -1], [-1, 0], [0, 1], [1, 0]] // prettier-ignore
+      : [[0, 1], [1, 0], [0, -1], [-1, 0]]; // prettier-ignore
+  const [dx, dy] = dirs[r];
+  return { x: el.x + 2 * SIZE * dx, y: el.y + 2 * SIZE * dy };
+}
+
+/** Every pin of every library chip placed in a circuit, as "x,y". */
+function chipPins(circuit) {
+  const pins = new Set();
+  for (const el of circuit.elements) {
+    const lib = DIGITAL_LIB[el.name];
+    if (!lib) continue;
+    for (let p = 1; p <= lib.pins; p++) {
+      const at = dilPin(el.name, el.x, el.y, p);
+      pins.add(`${at.x},${at.y}`);
+    }
+  }
+  return pins;
+}
+
+test("an unconnected chip input is tied HIGH right on its pin, pointing away from the chip", () => {
   const doc = bench();
   const circuit = parse(exportOf(doc).files[0].text);
   const chip = circuit.elements.find((el) => el.name === "7400.dig");
-  const ups = new Set(
+  const ups = new Map(
     circuit.elements
       .filter((el) => el.name === "PullUp")
-      .map((el) => `${el.x},${el.y}`),
+      .map((el) => [`${el.x},${el.y}`, el]),
   );
   // Gates 2–4 are unwired: their six inputs float, and read HIGH.
   for (const pin of [4, 5, 9, 10, 12, 13]) {
     const at = dilPin("7400.dig", chip.x, chip.y, pin);
-    assert.ok(ups.has(`${at.x},${at.y}`), `pin ${pin} is pulled up`);
+    const up = ups.get(`${at.x},${at.y}`);
+    assert.ok(up, `pin ${pin} is pulled up`);
+    // Out along its own row — left of a left-hand pin, right of a right-hand
+    // one — never up the column onto the next pin's lead (2A's onto 1Y).
+    const tip = pullTip(up);
+    assert.equal(tip.y, at.y, `pin ${pin}'s pull-up lies along its row`);
+    assert.equal(
+      Math.sign(tip.x - at.x),
+      pin <= 7 ? -1 : 1,
+      `pin ${pin}'s pull-up points away from the chip`,
+    );
+  }
+});
+
+test("no demo's pulls reach a chip pin other than their own", () => {
+  for (const { ref, doc } of demoDocs()) {
+    const circuit = parse(exportOf(doc, ref).files[0].text);
+    const pins = chipPins(circuit);
+    for (const el of circuit.elements) {
+      if (el.name !== "PullUp" && el.name !== "PullDown") continue;
+      const tip = pullTip(el);
+      // The body runs from its pin to its tip; a chip pin anywhere along it
+      // past the pin itself is a lead drawn over.
+      for (let k = 1; k <= 2; k++) {
+        const x = el.x + ((tip.x - el.x) * k) / 2;
+        const y = el.y + ((tip.y - el.y) * k) / 2;
+        assert.ok(
+          !pins.has(`${x},${y}`),
+          `${ref}: the ${el.name} at ${el.x},${el.y} lies over a pin at ${x},${y}`,
+        );
+      }
+    }
   }
 });
 

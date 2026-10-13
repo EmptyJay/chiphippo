@@ -298,6 +298,7 @@
       "availableVersion": "La version {version} est disponible — téléchargement en arrière-plan…",
       "ready": "La mise à jour est prête à être installée.",
       "readyVersion": "La version {version} est prête à être installée.",
+      "preparing": "Préparation de la mise à jour — Chip Hippo redémarre dès qu'elle est prête.",
       "upToDate": "Tu utilises la dernière version de Chip Hippo.",
       "storeBuild": "Les mises à jour sont livrées par l'App Store.",
       "devBuild": "Les mises à jour ne sont disponibles que dans les versions installées.",
@@ -1224,7 +1225,8 @@
       "deleteSignal": "Supprimer le signal",
       "openChipDesigner": "Ouvrir dans le Concepteur de puces",
       "breakOnSettled": "Arrêt sur stabilisation",
-      "openCpuMonitor": "Ouvrir le moniteur CPU"
+      "openCpuMonitor": "Ouvrir le moniteur CPU",
+      "inspectMemory": "Inspecter la mémoire"
     },
     "remove": {
       "confirm": "Retirer",
@@ -1302,6 +1304,9 @@
     "failOpen": "Le projet n'a pas pu être ouvert",
     "failSave": "Le projet n'a pas pu être enregistré",
     "slotHeld": "Le projet non enregistré de la dernière session n'a pas pu être lu ; il est donc conservé là où celui-ci serait enregistré. Utilisez Enregistrer sous pour donner à ce projet son propre fichier.",
+    "slotUnreadTitle": "Le travail de la dernière session n'a pas pu être lu",
+    "slotAside": "Le projet conservé de la dernière session n'a pas pu être lu. Il a été déplacé, sans modification, vers {path}, où Fichier ▸ Ouvrir peut l'atteindre.",
+    "slotLeft": "Le projet conservé de la dernière session n'a pu être ni lu ni déplacé ; il reste donc à {path} pour que le prochain lancement réessaie. D'ici là, un projet sans fichier propre ne peut être enregistré qu'avec Enregistrer sous.",
     "failClose": "Impossible de vérifier les modifications non enregistrées — enregistrez votre travail avant de quitter",
     "failLocation": "Aucun emplacement n'a pu être choisi",
     "failDuplicate": "Le bureau n'a pas pu être dupliqué",
@@ -1340,6 +1345,7 @@
       "unmapped": "{format} n'a rien à placer à sa place",
       "clockConnector": "devient un connecteur CLOCK IN : sur une carte, il faut un oscillateur à cet endroit",
       "genericFootprint": "reçoit une empreinte de barrette : choisissez celle du vrai composant",
+      "pushButtonFootprint": "reçoit l'empreinte d'un bouton-poussoir de 6 mm, pour sa taille seulement : choisissez celle du vrai composant",
       "resistorMerged": "devient un fil : un simulateur logique n'a pas de résistances",
       "momentary": "devient un interrupteur à bascule : Digital n'a pas de contact momentané",
       "unpowered": "est alimenté dans Digital, qui ne sait pas simuler une puce non alimentée",
@@ -1488,6 +1494,7 @@
     "checkFailed": "Échec de la recherche de mises à jour",
     "installFailed": "Mise à jour non installée",
     "installFailedMessage": "La mise à jour n'a pas pu être installée pour l'instant, Chip Hippo reste donc ouvert dans cette version. Cliquez sur Redémarrer pour réessayer.",
+    "installBlockedMessage": "macOS n'a pas pu préparer la mise à jour pour l'installer, Chip Hippo reste donc ouvert dans cette version. Recherchez les mises à jour pour la télécharger à nouveau, ou obtenez-la sur chiphippo.com.",
     "preparing": "Préparation de la mise à jour",
     "preparingMessage": "Chip Hippo redémarrera dans la nouvelle version dès qu'elle sera prête, après vous avoir interrogé sur le travail non enregistré. Vous pouvez continuer à travailler en attendant."
   },
@@ -1653,7 +1660,6 @@
       "sine": "Sinusoïdale"
     },
     "action": {
-      "inspectMemory": "Inspecter la mémoire…",
       "programMemory": "Charger une image… (programmer)",
       "manageConnections": "Gérer les connexions…"
     },
@@ -1664,6 +1670,7 @@
       "reversed": "Alimentation inversée — VCC et GND sont intervertis.",
       "damaged": "Détruit — {volts} V dépassent les {rating} de ce composant et ont fait sortir la fumée. Arrêter la simulation le rétablit.",
       "unprogrammed": "Non programmé — aucune image n'est chargée, donc cette puce lit du bruit aléatoire.",
+      "unsaved": "Modifié, non enregistré — l'inspecteur de mémoire contient des modifications que le fichier de cette puce n'a pas encore. Enregistrez dans l'inspecteur pour les conserver.",
       "timing": "Temporisation non reconnue — {problems}. Ses sorties restent au repos tant qu'il n'est pas câblé comme le montre sa fiche technique.",
       "heldOn": "Maintenu PASSANT — sa grille n'a aucun niveau, et la charge qui y reste garde le canal conducteur. Une vraie grille perd cette charge : reliez-la à un niveau défini par une résistance.",
       "heldOff": "Maintenu BLOQUÉ — sa grille n'a aucun niveau, il reste donc tel qu'il a été commandé en dernier (bloqué si sa grille n'a encore jamais été commandée). Une vraie grille dérive : reliez-la à un niveau défini par une résistance.",

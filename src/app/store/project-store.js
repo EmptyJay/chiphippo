@@ -673,12 +673,15 @@ class ProjectStore {
    * damaged file) may hold the only copy of the work, and the slot is about to
    * become the next project's home, whose first autosave would write over it.
    * Where it went, or null when there was nothing to move. Throws when the
-   * move itself fails — the caller must then leave the slot alone.
+   * move itself fails — the caller must then leave the slot alone. The name
+   * keeps the project extension, so File ▸ Open can reach it once whatever
+   * kept it from being read is fixed.
    */
   setAsideDefaultProject() {
     const from = this.defaultProjectPath;
     if (!existsSafe(from)) return null;
-    const to = `${from}.unread-${Date.now()}`;
+    const stem = from.slice(0, -PROJECT_EXT.length);
+    const to = `${stem}.unread-${Date.now()}${PROJECT_EXT}`;
     fs.renameSync(from, to);
     return to;
   }

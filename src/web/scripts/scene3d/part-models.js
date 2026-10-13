@@ -48,7 +48,7 @@ import { partNumberOf, transistorCase } from "../catalog/discretes.js";
 import { hzLabel } from "../catalog/parts.js";
 import { loadBadge, relayCoilVolts } from "../catalog/bench-parts.js";
 import { holePosition } from "../model/breadboard.js";
-import { packageSpec } from "../model/footprints.js";
+import { packageSpec, seatsWide } from "../model/footprints.js";
 import { partPinsWorld } from "../model/part-geometry.js";
 import { formatOhms } from "../model/ohm-format.js";
 import { formatFarads } from "../model/farad-format.js";
@@ -187,6 +187,35 @@ function slab(sb, o, x0, z0, x1, z1, y0, y1, color, r = 0.12) {
   );
 }
 
+/**
+ * A part's own frame, turned a half lap about the middle of its row of holes
+ * when the part is (`params.rot` 180 on a `reversible` part — the transistors,
+ * the trimmer and the relay, drawn turned on the desk too: discrete-view.js's
+ * turnHalfLap): the same holes, the body swung round to the other side of the
+ * row. `at`/`slab`/`box` take the unturned part's local coordinates; `dir`
+ * turns a direction, and `front`/`top` are the label frames for a face that
+ * faced the viewer and for the top. A 180° turn about the vertical is a
+ * rotation, not a mirror, so outlines keep their winding.
+ */
+function partFrame(def, params) {
+  const turned = params?.rot === 180 && def?.reversible === true;
+  const span = footprintOffsets(def, params).at(-1);
+  const lx = (x) => (turned ? span - x : x);
+  const lz = (z) => (turned ? -z : z);
+  const lo = (a, b) => Math.min(a, b);
+  const hi = (a, b) => Math.max(a, b);
+  return {
+    at: (o, x, y, z) => at(o, lx(x), y, lz(z)),
+    slab: (sb, o, x0, z0, x1, z1, y0, y1, color, r) =>
+      slab(sb, o, lo(lx(x0), lx(x1)), lo(lz(z0), lz(z1)), hi(lx(x0), lx(x1)), hi(lz(z0), lz(z1)), y0, y1, color, r), // prettier-ignore
+    box: (sb, o, [x0, y0, z0], [x1, y1, z1], color) =>
+      sb.mesh.box(at(o, lo(lx(x0), lx(x1)), y0, lo(lz(z0), lz(z1))), at(o, hi(lx(x0), lx(x1)), y1, hi(lz(z0), lz(z1))), color), // prettier-ignore
+    dir: (d) => (turned ? [-d[0], d[1], -d[2]] : d),
+    front: turned ? { right: [-1, 0, 0], up: [0, 1, 0] } : ON_FRONT,
+    top: turned ? { right: [-1, 0, 0], up: [0, 0, 1] } : ON_TOP,
+  };
+}
+
 /** A flat rectangle printed on a face at height `y`. */
 function printRect(mesh, o, x0, z0, x1, z1, y, color) {
   mesh.quad(
@@ -268,7 +297,7 @@ function buildChip(sb, doc, comp, def, params) {
   if (!o) return false;
   const p = sb.palette;
   const { halfPins } = packageSpec(def.package);
-  const box = chipBodyBox(def.package, comp.anchor);
+  const box = chipBodyBox(def.package, comp.anchor, seatsWide(comp.params));
   const x0 = box.minX;
   const x1 = box.minX + box.width;
   const z0 = box.minY;
@@ -666,14 +695,15 @@ function buildRnet(sb, doc, comp, def, params) {
 function buildPot(sb, doc, comp, def, params) {
   const o = anchorOf(doc, comp);
   if (!o) return false;
+  const f = partFrame(def, params);
   const p = sb.palette;
   const Y1 = 2.1;
   for (const dx of footprintOffsets(def, params)) stub(sb, o.x + dx, o.z, 0.3);
-  slab(sb, o, 1 - 1.85, -0.75, 1 + 1.85, 0.75, 0.25, Y1, p.trimpot, 0.2);
-  const screw = at(o, 2.25, Y1, 0);
+  f.slab(sb, o, 1 - 1.85, -0.75, 1 + 1.85, 0.75, 0.25, Y1, p.trimpot, 0.2);
+  const screw = f.at(o, 2.25, Y1, 0);
   sb.mesh.cylinder(screw, UP, 0.42, 0.14, p.screw, { segments: 18 });
   const turn = ((-135 + 2.7 * (params.position ?? 50)) * Math.PI) / 180;
-  const along = [Math.sin(turn), 0, -Math.cos(turn)];
+  const along = f.dir([Math.sin(turn), 0, -Math.cos(turn)]);
   sb.mesh.orientedBox(
     add(screw, [0, 0.15, 0]),
     along,
@@ -684,7 +714,8 @@ function buildPot(sb, doc, comp, def, params) {
   );
   sb.label({
     text: Number.isFinite(params.ohms) ? formatOhms(params.ohms) : "",
-    center: at(o, 0.55, Y1 + INK, 0),
+    center: f.at(o, 0.55, Y1 + INK, 0),
+    ...f.top,
     height: 0.5,
     maxWidth: 2.2,
     color: p.trimpotText,
@@ -698,25 +729,27 @@ const transistorText = (def, params) =>
   partNumberOf(params) ?? TYPE_LABEL[def.transistor.type] ?? "";
 
 /** A linear regulator in its TO-220: the transistor's package, its part
-    number on the face. No lamp — what it does is a reading. */
-function buildRegulator(sb, doc, comp, def) {
+    number on the face, turned with it (`partFrame`). No lamp — what it does
+    is a reading. */
+function buildRegulator(sb, doc, comp, def, params) {
   const o = anchorOf(doc, comp);
   if (!o) return false;
+  const f = partFrame(def, params);
   const p = sb.palette;
   const { left, width, back, tab, front } = TO220;
   const mould = back + tab;
   const Y0 = 0.9;
   const Y1 = 4.4;
   for (const dx of [0, 1, 2]) stub(sb, o.x + dx, o.z, Y0 + 0.05);
-  sb.mesh.box(at(o, left, Y0, mould), at(o, left + width, Y1, front), p.transistor); // prettier-ignore
-  sb.mesh.box(at(o, left, Y0, back), at(o, left + width, Y1 + 1.8, mould), p.transistorTab); // prettier-ignore
+  f.box(sb, o, [left, Y0, mould], [left + width, Y1, front], p.transistor);
+  f.box(sb, o, [left, Y0, back], [left + width, Y1 + 1.8, mould], p.transistorTab); // prettier-ignore
   for (const z of [mould + INK, back - INK]) {
-    sb.mesh.disc(at(o, 1, Y1 + 1.0, z), [0, 0, 1], 0.5, p.partInset, 16);
+    sb.mesh.disc(f.at(o, 1, Y1 + 1.0, z), f.dir([0, 0, 1]), 0.5, p.partInset, 16); // prettier-ignore
   }
   sb.label({
     text: def.id,
-    center: at(o, 1, (Y0 + Y1) / 2, front + INK),
-    ...ON_FRONT,
+    center: f.at(o, 1, (Y0 + Y1) / 2, front + INK),
+    ...f.front,
     height: 0.6,
     maxWidth: width - 0.4,
     color: p.transistorText,
@@ -731,38 +764,41 @@ function buildRegulator(sb, doc, comp, def) {
 function buildRelay(sb, doc, comp, def, params) {
   const o = anchorOf(doc, comp);
   if (!o) return false;
+  const f = partFrame(def, params);
   const p = sb.palette;
   const Y0 = 0.3;
   const Y1 = 6.1;
   const back = -4;
   const front = 0.45;
   for (const dx of [0, 1, 2, 3, 4]) stub(sb, o.x + dx, o.z, Y0 + 0.05);
-  slab(sb, o, -0.6, back, 4.6, front, Y0, Y1, p.relay, 0.25);
+  f.slab(sb, o, -0.6, back, 4.6, front, Y0, Y1, p.relay, 0.25);
   const rating = `${relayCoilVolts(params)}V`;
   sb.label({
     text: rating,
-    center: at(o, 2, Y1 + INK, -2.4),
+    center: f.at(o, 2, Y1 + INK, -2.4),
+    ...f.top,
     height: 1.2,
     maxWidth: 4.2,
     color: p.relayText,
   });
   sb.label({
     text: "RELAY",
-    center: at(o, 2, Y1 + INK, -1.2),
+    center: f.at(o, 2, Y1 + INK, -1.2),
+    ...f.top,
     height: 0.6,
     maxWidth: 4.2,
     color: p.relayText,
   });
   sb.label({
     text: rating,
-    center: at(o, 2, (Y0 + Y1) / 2, front + INK),
-    ...ON_FRONT,
+    center: f.at(o, 2, (Y0 + Y1) / 2, front + INK),
+    ...f.front,
     height: 1.1,
     maxWidth: 4.6,
     color: p.relayText,
   });
   const lampColors = { on: p.partOn, off: p.partInset };
-  const centre = at(o, 4.1, Y1 + INK, -3.5);
+  const centre = f.at(o, 4.1, Y1 + INK, -3.5);
   sb.lamp({
     kind: "channel",
     compId: comp.id,
@@ -777,6 +813,7 @@ function buildRelay(sb, doc, comp, def, params) {
 function buildTransistor(sb, doc, comp, def, params) {
   const o = anchorOf(doc, comp);
   if (!o) return false;
+  const f = partFrame(def, params);
   const p = sb.palette;
   const lampColors = { on: p.partOn, off: p.partInset };
   if (transistorCase(def, params) === "TO-220") {
@@ -785,28 +822,20 @@ function buildTransistor(sb, doc, comp, def, params) {
     const Y0 = 0.9;
     const Y1 = 4.4;
     for (const dx of [0, 1, 2]) stub(sb, o.x + dx, o.z, Y0 + 0.05);
-    sb.mesh.box(
-      at(o, left, Y0, mould),
-      at(o, left + width, Y1, front),
-      p.transistor,
-    );
-    sb.mesh.box(
-      at(o, left, Y0, back),
-      at(o, left + width, Y1 + 1.8, mould),
-      p.transistorTab,
-    );
+    f.box(sb, o, [left, Y0, mould], [left + width, Y1, front], p.transistor);
+    f.box(sb, o, [left, Y0, back], [left + width, Y1 + 1.8, mould], p.transistorTab); // prettier-ignore
     for (const z of [mould + INK, back - INK]) {
-      sb.mesh.disc(at(o, 1, Y1 + 1.0, z), [0, 0, 1], 0.5, p.partInset, 16);
+      sb.mesh.disc(f.at(o, 1, Y1 + 1.0, z), f.dir([0, 0, 1]), 0.5, p.partInset, 16); // prettier-ignore
     }
     sb.label({
       text: transistorText(def, params),
-      center: at(o, 1, (Y0 + Y1) / 2, front + INK),
-      ...ON_FRONT,
+      center: f.at(o, 1, (Y0 + Y1) / 2, front + INK),
+      ...f.front,
       height: 0.6,
       maxWidth: width - 0.4,
       color: p.transistorText,
     });
-    const centre = at(o, 1, Y1 + INK, (mould + front) / 2);
+    const centre = f.at(o, 1, Y1 + INK, (mould + front) / 2);
     sb.lamp({
       kind: "channel",
       compId: comp.id,
@@ -829,26 +858,26 @@ function buildTransistor(sb, doc, comp, def, params) {
   const outline = [];
   for (let i = 0; i <= 20; i++) {
     const a = from + ((to - from) * i) / 20;
-    outline.push(at(o, cx + Math.cos(a) * r, Y0, cz + Math.sin(a) * r));
+    outline.push(f.at(o, cx + Math.cos(a) * r, Y0, cz + Math.sin(a) * r));
   }
   sb.mesh.extrude(outline, [0, Y1 - Y0, 0], p.transistor, { smooth: true });
   for (const dx of [0, 1, 2]) {
     const lean = (dx - 1) * 0.6;
     sb.lead([
-      at(o, dx, -HOLE_DEPTH, 0),
-      at(o, dx, 0.45, 0),
-      at(o, 1 + lean * 0.6, Y0 + 0.05, 0),
+      f.at(o, dx, -HOLE_DEPTH, 0),
+      f.at(o, dx, 0.45, 0),
+      f.at(o, 1 + lean * 0.6, Y0 + 0.05, 0),
     ]);
   }
   sb.label({
     text: transistorText(def, params),
-    center: at(o, cx, (Y0 + Y1) / 2 + 0.2, flat + INK),
-    ...ON_FRONT,
+    center: f.at(o, cx, (Y0 + Y1) / 2 + 0.2, flat + INK),
+    ...f.front,
     height: 0.34,
     maxWidth: 1.05,
     color: p.transistorText,
   });
-  const centre = at(o, cx, Y1 + INK, cz - 0.3);
+  const centre = f.at(o, cx, Y1 + INK, cz - 0.3);
   sb.lamp({
     kind: "channel",
     compId: comp.id,

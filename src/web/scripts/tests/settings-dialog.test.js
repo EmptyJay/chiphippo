@@ -997,6 +997,9 @@ test("SettingsDialog: About tracks the updater broadcasts and offers Restart", a
 
   restart.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.equal(calls.install, 1);
+  // macOS still taking it: the line says so rather than standing still.
+  fire("chiphippo:updater-preparing");
+  assert.match(aboutStatus().textContent, /Preparing the update/);
 
   // "store-build" / "dev-build" are ANSWERS, not failures.
   fire("chiphippo:updater-not-available", {

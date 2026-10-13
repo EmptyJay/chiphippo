@@ -298,6 +298,7 @@
       "availableVersion": "Version {version} is available — downloading in the background…",
       "ready": "The update is ready to install.",
       "readyVersion": "Version {version} is ready to install.",
+      "preparing": "Preparing the update — Chip Hippo restarts as soon as it is ready.",
       "upToDate": "You're running the latest version of Chip Hippo.",
       "storeBuild": "Updates are delivered through the App Store.",
       "devBuild": "Updates are only available in installed builds.",
@@ -1223,7 +1224,8 @@
       "deleteSignal": "Delete Signal",
       "openChipDesigner": "Open in Chip Designer",
       "breakOnSettled": "Break on Settled",
-      "openCpuMonitor": "Open CPU Monitor"
+      "openCpuMonitor": "Open CPU Monitor",
+      "inspectMemory": "Inspect Memory"
     },
     "remove": {
       "confirm": "Remove",
@@ -1301,6 +1303,9 @@
     "failOpen": "Could not open the project",
     "failSave": "Could not save the project",
     "slotHeld": "Last session's unsaved project could not be read, so it is kept where this one would be saved. Use Save As to give this project a file of its own.",
+    "slotUnreadTitle": "Last session's work could not be read",
+    "slotAside": "The project kept from your last session could not be read. It has been moved, unchanged, to {path}, where File ▸ Open can reach it.",
+    "slotLeft": "The project kept from your last session could not be read or moved, so it is left at {path} for the next launch to try again. Until then, a project without a file of its own can only be saved with Save As.",
     "failClose": "Could not check for unsaved changes — save your work before quitting",
     "failLocation": "Could not choose a location",
     "failDuplicate": "Could not duplicate the desktop",
@@ -1339,6 +1344,7 @@
       "unmapped": "{format} has nothing to place for it",
       "clockConnector": "becomes a CLOCK IN connector — a board needs an oscillator there",
       "genericFootprint": "gets a pin-header footprint — choose the real part's",
+      "pushButtonFootprint": "gets a 6 mm push-button footprint, for its size only — choose the real part's",
       "resistorMerged": "becomes a wire: a logic simulator has no resistors",
       "momentary": "becomes a toggle switch: Digital has no momentary contact",
       "unpowered": "is powered in Digital, which cannot run an unpowered chip",
@@ -1485,6 +1491,7 @@
     "checkFailed": "Update check failed",
     "installFailed": "Update not installed",
     "installFailedMessage": "The update could not be installed just now, so Chip Hippo is still open on this version. Press Restart to try again.",
+    "installBlockedMessage": "macOS could not get the update ready to install, so Chip Hippo is still open on this version. Check for updates to download it again, or get it from chiphippo.com.",
     "preparing": "Preparing the update",
     "preparingMessage": "Chip Hippo restarts into the new version as soon as it is ready — it asks about unsaved work first. Keep working meanwhile."
   },
@@ -1650,7 +1657,6 @@
       "sine": "Sine"
     },
     "action": {
-      "inspectMemory": "Inspect memory…",
       "programMemory": "Load image… (program)",
       "manageConnections": "Manage connections…"
     },
@@ -1661,6 +1667,7 @@
       "reversed": "Power reversed — VCC and GND are swapped.",
       "damaged": "Damaged — {volts} V is over this part's {rating}, and it let the smoke out. Stopping the simulation restores it.",
       "unprogrammed": "Not programmed — no image is loaded, so this chip reads random noise.",
+      "unsaved": "Edited, not saved — the memory inspector has changes this chip's file does not have yet. Save in the inspector to keep them.",
       "timing": "Timing not recognised — {problems}. Its outputs stay at rest until it is wired as its datasheet shows.",
       "heldOn": "Holding ON — its gate reads no level, and the charge left on it keeps the channel conducting. A real gate leaks that charge away, so tie it to a defined level with a resistor.",
       "heldOff": "Holding OFF — its gate reads no level, so it stays as it was last driven (off, if its gate has not been driven yet). A real gate drifts, so tie it to a defined level with a resistor.",

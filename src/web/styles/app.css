@@ -4794,6 +4794,7 @@ textarea.annotation-editor {
 
 .part-chip--unpowered .part-warn,
 .part-chip--unprogrammed .part-warn,
+.part-chip--unsaved .part-warn,
 .part-chip--timing .part-warn {
   display: block;
 }

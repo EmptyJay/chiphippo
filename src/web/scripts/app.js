@@ -1868,7 +1868,12 @@ async function init() {
     // window.
     onOpenMemory: (id) => memoryBridge?.open(id),
     // "Load image… (program)" on a ROM chip → the in-app external programmer.
-    onProgramMemory: (id) => memoryBridge?.program(id),
+    onProgramMemory: (id) =>
+      void memoryBridge
+        ?.program(id)
+        .catch((err) =>
+          console.error("[renderer] program memory failed:", err),
+        ),
     // A ROM chip gets a noise-filled backing file on placement, deleted on
     // removal (the byte store lives in main; Feature 190).
     onCreateMemoryFile: (guid, byteLength) =>
@@ -2345,8 +2350,8 @@ async function init() {
       bridge.settings
         .set({ cpuMonitorKeepEdits: on })
         .catch((err) => console.error("[renderer] settings:set failed:", err)),
-    saveRom: (compId, bytes, opts) =>
-      memoryBridge?.keepRunEdits(compId, bytes, opts) ?? Promise.resolve(false),
+    saveRom: (compId, bytes) =>
+      memoryBridge?.keepRunEdits(compId, bytes) ?? Promise.resolve(false),
     // Its breakpoints live in the project, per desktop.
     store: {
       load: () => workspace?.cpuBreakpoints() ?? {},
@@ -2372,6 +2377,12 @@ async function init() {
     // signature comparison can see — and re-saving an already-programmed chip
     // leaves the document identical. So the write says so itself.
     onImagesChanged: () => workspace?.markImagesChanged(),
+    // Every ROM write flags its chip in the desktop it BEGAN on — wherever
+    // that is by the time it lands (on the desk, in the project, or both),
+    // never whatever chip shares its id on a desk loaded since.
+    whereNow: () => workspace?.deskWhere() ?? null,
+    markKept: (where, compId, binding, guid) =>
+      workspace?.markRomKept(where, compId, binding, guid),
   });
 
   // The empty-desk hint disappears once the desk has boards.

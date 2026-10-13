@@ -123,8 +123,9 @@ export function pokeWord(where, word, value) {
 export class CpuMemoryMap {
   #doc = null;
   #netlist = null;
-  #cpuId = null;
-  #pages = new Map(); // page → answer | null
+  // Per CPU: page → answer | null. One map per CPU, so two read in turn (the
+  // monitor on one, a Step Over decoding on the other) keep their pages.
+  #pages = new Map();
 
   /**
    * A reader of CPU addresses for one board, `(addr) => byte | null`.
@@ -161,21 +162,19 @@ export class CpuMemoryMap {
     return { compId: answer.compId, offset, fromPin: answer.fromPin };
   }
 
-  /** The answer for `addr`'s page, resolved once per document + netlist. */
+  /** The answer for `addr`'s page, resolved once per document + netlist
+      (+ CPU). */
   #answer(env, addr) {
-    const same =
-      env.doc === this.#doc &&
-      env.netlist === this.#netlist &&
-      env.cpuId === this.#cpuId;
-    if (!same) {
+    if (env.doc !== this.#doc || env.netlist !== this.#netlist) {
       this.#doc = env.doc;
       this.#netlist = env.netlist;
-      this.#cpuId = env.cpuId;
       this.#pages = new Map();
     }
+    let pages = this.#pages.get(env.cpuId);
+    if (!pages) this.#pages.set(env.cpuId, (pages = new Map()));
     const page = (addr & 0xffff) >> 8;
-    if (!this.#pages.has(page)) this.#pages.set(page, this.#resolve(page, env)); // prettier-ignore
-    return this.#pages.get(page);
+    if (!pages.has(page)) pages.set(page, this.#resolve(page, env));
+    return pages.get(page);
   }
 
   /** Forget every page (a new run). */

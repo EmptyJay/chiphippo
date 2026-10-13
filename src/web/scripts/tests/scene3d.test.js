@@ -73,6 +73,7 @@ import { annotationLines } from "../scene3d/annotation-model.js";
 import { DESK_Y } from "../scene3d/scene-builder.js";
 import { PALETTE_DEFS } from "../catalog/index.js";
 import { normalizeDocument } from "../model/desk-doc.js";
+import { holePosition } from "../model/breadboard.js";
 import { WIRE_COLORS } from "../model/wire-colors.js";
 import { everyPartDesk, plainDoc } from "./scene3d-fixture.js";
 
@@ -392,6 +393,45 @@ test("scene: every shipped example builds cleanly, every part modelled", () => {
       name,
     );
     assertFinite(scene.mesh, name);
+  }
+});
+
+test("scene: a turned transistor, regulator, pot or relay is its model turned a half lap about its middle hole", () => {
+  // One part on a board, as placed and turned end for end: the same holes,
+  // the body — and every label on it — swung round to the far side.
+  const sceneOf = (ref, params) =>
+    buildScene(
+      {
+        boards: [{ id: "bb1", type: "pins-full", x: 0, y: 0, rot: 0 }],
+        components: [{ id: "c1", kind: "discrete", ref, board: "bb1", anchor: "c10", params }], // prettier-ignore
+        wires: [],
+      },
+      palette,
+    );
+  const hole = holePosition("pins-full", "c10");
+  for (const [ref, params, span] of [
+    ["npn", {}, 2],
+    ["nmos", {}, 2], // a TO-220
+    ["LM7805", {}, 2],
+    ["pot", { ohms: 10000, position: 30 }, 2],
+    ["relay", {}, 4],
+  ]) {
+    const flat = sceneOf(ref, params);
+    const turned = sceneOf(ref, { ...params, rot: 180 });
+    assert.deepEqual(turned.errors, [], ref);
+    assert.ok(flat.labels.length > 0, `${ref}: labels to compare`);
+    assert.equal(turned.labels.length, flat.labels.length);
+    flat.labels.forEach((f, i) => {
+      const t = turned.labels[i];
+      assert.equal(t.text, f.text);
+      // Its place mirrored about the middle hole (across the row and across
+      // the board), its height kept…
+      assert.ok(close((f.center[0] + t.center[0]) / 2, hole.x + span / 2), `${ref}: "${f.text}" across the row`); // prettier-ignore
+      assert.ok(close((f.center[2] + t.center[2]) / 2, hole.y), `${ref}: "${f.text}" across the board`); // prettier-ignore
+      assert.ok(close(t.center[1], f.center[1]));
+      // …and its lettering turned with it.
+      assert.ok(close(t.right[0], -f.right[0]) && close(t.right[2], -f.right[2]), `${ref}: "${f.text}" turned`); // prettier-ignore
+    });
   }
 });
 

@@ -30,7 +30,9 @@ import assert from "node:assert/strict";
 import { resetDom } from "./jsdom-setup.js";
 import { DeskDoc, emptyDocument } from "../model/desk-doc.js";
 import { newCustomChip } from "../model/custom-chip.js";
-import { setCustomChips } from "../catalog/index.js";
+import { partDef, setCustomChips } from "../catalog/index.js";
+import { isRomChip } from "../sim/chip-eval.js";
+import { programmedPatch } from "../model/rom-binding.js";
 
 const { ProjectWorkspace } = await import("../components/project-workspace.js");
 const { ProjectTabs } = await import("../components/project-tabs.js");
@@ -176,6 +178,7 @@ function fakeBridge() {
         counts.stashes += 1;
         if (holdSave) await holdSave;
         if (!location) throw new Error("a recovery copy needs a project path");
+        if (control.slotHeld) return { ok: false, code: "slot-held" };
         projects.set(DEFAULT_PROJECT, {
           ...clone(meta),
           recoveryFor: location,
@@ -350,6 +353,15 @@ async function harness({
       this.loads.push(opts);
       doc.load(raw);
       onLoad?.(doc);
+    },
+    // DeskController's, on the harness's DeskDoc (memory-routing.test.js
+    // holds the real one to the same answers).
+    setMemoryProgrammed(id, programmed, binding = {}, { guid = null } = {}) {
+      const comp = doc.getComponent(id);
+      if (!comp || !isRomChip(partDef(comp.ref))) return false;
+      if (guid != null && comp.params?.storage?.guid !== guid) return false;
+      doc.setComponentParams(id, programmedPatch(comp.params, programmed, binding)); // prettier-ignore
+      return true;
     },
   };
   let camera = { cx: 0, cy: 0, zoom: 1 };
@@ -556,6 +568,27 @@ test("a project that opens with warnings says so once", async () => {
   fake.seedProject(DEFAULT_PROJECT, meta);
   await harness({ fake });
   assert.match(dialogTitle(), /could not be restored/);
+});
+
+test("the boot's notes on a slot it could not read are worded here, under their own title", async () => {
+  while (PopupManager.isOpen()) PopupManager.close();
+  const fake = fakeBridge();
+  const aside = `${SAVES}/default.unread-1.chiphippo`;
+  const boot = fake.bridge.project.boot;
+  fake.bridge.project.boot = async () => ({
+    ...(await boot()),
+    // FACTS from main (boot-slot.js), then a string a project brought itself.
+    warnings: [{ key: "workspace.slotAside", path: aside }, '"Gone" opens empty'], // prettier-ignore
+  });
+  await harness({ fake });
+  assert.match(dialogTitle(), /Last session's work could not be read/);
+  const message = () => document.querySelector(".popup-message")?.textContent ?? ""; // prettier-ignore
+  assert.ok(message().includes(aside), "the path interpolated");
+  assert.doesNotMatch(message(), /Gone/, "the project's own warnings apart");
+  PopupManager.close();
+  assert.match(dialogTitle(), /could not be restored/);
+  assert.match(message(), /Gone/);
+  PopupManager.close();
 });
 
 // ── A just-loaded project is CLEAN ───────────────────────────────────────────
@@ -869,6 +902,67 @@ test("tab clicks queued behind a held switch are one switch, to the last one, an
   }
 });
 
+test("a click queued after a queued add is its own switch, after it: the last click is still the desk you get", async () => {
+  const h = await harness();
+  await twoDesktops(h); // on t1
+  let release;
+  const gate = new Promise((r) => (release = r));
+  let first = true;
+  const onLeave = (e) => {
+    if (!first) return;
+    first = false;
+    e.detail.hold(gate);
+  };
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    const held = h.workspace.selectTab("t2"); // held
+    await settle();
+    const queued = [
+      h.workspace.selectTab("t1"), // queued behind the held one
+      h.workspace.addTab(), // t3
+      h.workspace.selectTab("t2"), // after the add
+    ];
+    release();
+    await Promise.all([held, ...queued]);
+    assert.equal(h.workspace.activeTab.id, "t2", "the last click");
+    assert.equal(h.strip().length, 3, "and the add happened");
+  } finally {
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+});
+
+test("the strip stays busy until the LAST of two overlapping waits is done", async () => {
+  const h = await harness();
+  await twoDesktops(h); // on t1
+  h.doc.load(someDesign());
+  const gates = {};
+  const gate = (name) => new Promise((r) => (gates[name] = r));
+  let writing = true; // one write, held once
+  const onPending = (e) => writing && ((writing = false), e.detail.hold(gate("write"))); // prettier-ignore
+  const onLeave = (e) => e.detail.hold(gate("leave"));
+  window.addEventListener("chiphippo:writes-pending", onPending);
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  const busy = () => h.tabs.element.classList.contains("project-tabs--busy");
+  try {
+    const closing = h.workspace.confirmClose(); // waits on the write
+    await settle();
+    const switching = h.workspace.selectTab("t2"); // waits on its own hold
+    await settle();
+    assert.ok(busy());
+    gates.leave();
+    await switching;
+    assert.ok(busy(), "the quit's wait is still on");
+    gates.write();
+    await settle();
+    assert.ok(!busy());
+    clickButton("Discard");
+    await closing;
+  } finally {
+    window.removeEventListener("chiphippo:writes-pending", onPending);
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+});
+
 test("a hold that never answers does not hold the switch forever", async () => {
   const h = await harness({ holdMs: 20 });
   await twoDesktops(h); // on t1
@@ -995,6 +1089,20 @@ test("a save into a HELD working slot says why, in words, and points at Save As"
   assert.match(dialogTitle(), /Could not save the project/);
   assert.match(document.querySelector(".popup-message")?.textContent ?? "", /Use Save As/); // prettier-ignore
   assert.equal(h.workspace.dirty, true, "not claimed as saved");
+  PopupManager.close();
+});
+
+test("a background stash into a HELD slot is quiet, and not counted as stashed", async () => {
+  const h = await harness();
+  while (PopupManager.isOpen()) PopupManager.close();
+  await homed(h);
+  h.doc.load(someDesign());
+  h.control.slotHeld = true;
+  assert.equal(await h.workspace.autoSaveNow(), false);
+  await settle();
+  assert.equal(PopupManager.isOpen(), false, "never asked for, so no dialog");
+  assert.equal(h.stored()?.recoveryFor, undefined, "nothing reached the slot");
+  assert.equal(h.workspace.dirty, true);
 });
 
 // ── An edit landing while a write is in flight ───────────────────────────────
@@ -2957,4 +3065,198 @@ test("CPU breakpoints are the active desktop's, an edit to the project, and save
   assert.deepEqual(h.workspace.cpuBreakpoints(), {});
   await h.workspace.selectTab(tab);
   assert.deepEqual(h.workspace.cpuBreakpoints(), { c1: [0x8000, 0x8021] });
+});
+
+// ── A ROM write landing late ────────────────────────────────────────────────
+
+test("a ROM write landing after its desktop was switched away flags the chip in THAT desktop; one landing in a project opened since flags nothing", async () => {
+  const h = await harness();
+  const rom = placing("rom-8k");
+  rom.components[0].params = { storage: { guid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", source: "/old.bin", edited: true } }; // prettier-ignore
+  h.doc.load(rom);
+  const where = h.workspace.deskWhere(); // as the write began
+  assert.deepEqual(where, { project: where.project, tab: "t1" });
+  await h.workspace.addTab(); // t2 on the desk now
+  const before = h.announced.count;
+  assert.equal(h.workspace.markRomKept(where, "c1", { source: "/roms/boot.bin" }), true); // prettier-ignore
+  assert.ok(h.announced.count > before, "the project changed: the • says so");
+  await h.workspace.autoSaveNow();
+  const t1 = h.stored().tabs.find((t) => t.id === "t1");
+  assert.deepEqual(t1.doc.components[0].params, {
+    programmed: true,
+    storage: { guid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", source: "/roms/boot.bin" }, // prettier-ignore
+  });
+  // A desktop deleted since, or a chip gone from it: nothing to flag, and
+  // nothing for the • to say.
+  const quiet = h.announced.count;
+  assert.equal(h.workspace.markRomKept({ ...where, tab: "t9" }, "c1", {}), false); // prettier-ignore
+  assert.equal(h.workspace.markRomKept(where, "c7", {}), false);
+  assert.equal(h.announced.count, quiet);
+  // Another project open since: not its file.
+  await leaving(() => h.workspace.newProject());
+  assert.equal(h.workspace.markRomKept(where, "c1", { edited: true }), false);
+  assert.notEqual(h.workspace.deskWhere().project, where.project);
+});
+
+const ROM_GUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const romDesk = () => {
+  const rom = placing("rom-8k");
+  rom.components[0].params = { storage: { guid: ROM_GUID } };
+  return rom;
+};
+
+test("a ROM write landing in a switch's gap — its desk stashed, not yet replaced — is flagged in that desktop's copy", async () => {
+  const h = await harness();
+  h.doc.load(romDesk());
+  await twoDesktops(h); // on t1 (its ROM desk), t2 beside it
+  const where = h.workspace.deskWhere();
+  // Main answers in order: the late write's reply comes in while the swap
+  // awaits the aux windows closing — after the stash, before the load.
+  let landed = null;
+  h.bridge.project.closeAuxWindows = async () => {
+    landed ??= h.workspace.markRomKept(where, "c1", { source: "/roms/late.bin" }); // prettier-ignore
+  };
+  await h.workspace.selectTab("t2");
+  assert.equal(landed, true);
+  await h.workspace.autoSaveNow();
+  const t1 = h.stored().tabs.find((t) => t.id === "t1");
+  assert.deepEqual(t1.doc.components[0].params, { programmed: true, storage: { guid: ROM_GUID, source: "/roms/late.bin" } }); // prettier-ignore
+});
+
+test("a ROM write landing on the desk it began on flags the chip THERE — and only the chip that names its file", async () => {
+  const h = await harness();
+  h.doc.load(romDesk());
+  const where = h.workspace.deskWhere();
+  const before = h.announced.count;
+  // Another chip placed since under the same id: not the file's.
+  assert.equal(h.workspace.markRomKept(where, "c1", { edited: true }, "ffffffff-0000-0000-0000-000000000000"), false); // prettier-ignore
+  assert.equal(h.doc.getComponent("c1").params.programmed, undefined);
+  assert.equal(h.announced.count, before, "no •");
+  assert.equal(h.workspace.markRomKept(where, "c1", { source: "/roms/b.bin" }, ROM_GUID), true); // prettier-ignore
+  assert.deepEqual(h.doc.getComponent("c1").params, { programmed: true, storage: { guid: ROM_GUID, source: "/roms/b.bin" } }); // prettier-ignore
+  await h.workspace.autoSaveNow(); // the stash takes the DESK's copy
+  assert.equal(h.stored().tabs[0].doc.components[0].params.programmed, true);
+});
+
+test("a ROM deleted on the desk before its write lands: nothing flagged, no •, though the project's older copy still has it", async () => {
+  const h = await harness();
+  h.doc.load(romDesk());
+  await twoDesktops(h); // t1 stashed WITH the chip
+  const where = h.workspace.deskWhere();
+  h.doc.removeComponent("c1");
+  const before = h.announced.count;
+  assert.equal(h.workspace.markRomKept(where, "c1", { edited: true }, ROM_GUID), false); // prettier-ignore
+  assert.equal(h.announced.count, before);
+});
+
+test("a ROM write landing while its desktop is being duplicated reaches the copy too", async () => {
+  const h = await harness();
+  h.doc.load(romDesk());
+  await twoDesktops(h); // on t1
+  const where = h.workspace.deskWhere();
+  const NEW_GUID = "bbbbbbbb-0000-0000-0000-000000000000";
+  const duplicate = h.bridge.desktop.duplicate;
+  h.bridge.desktop.duplicate = async (doc, images) => {
+    // Main copies the file after the write (in order); the flag lands here.
+    h.workspace.markRomKept(where, "c1", { source: "/roms/late.bin" }, ROM_GUID); // prettier-ignore
+    const res = await duplicate(doc, images);
+    res.doc.components[0].params.storage.guid = NEW_GUID; // its own file
+    return res;
+  };
+  await h.workspace.duplicateTab("t1");
+  const copy = h.doc.getComponent("c1").params; // the copy is on the desk
+  assert.deepEqual(copy, { programmed: true, storage: { guid: NEW_GUID, source: "/roms/late.bin" } }); // prettier-ignore
+});
+
+test("a duplicate carries a late flag only to the chip it copied — not one placed since under its id", async () => {
+  const h = await harness();
+  h.doc.load(romDesk());
+  await twoDesktops(h); // on t1
+  const OTHER = "cccccccc-0000-0000-0000-000000000000";
+  const duplicate = h.bridge.desktop.duplicate;
+  h.bridge.desktop.duplicate = async (doc, images) => {
+    // Meanwhile: the ROM replaced by another under the same id, flagged —
+    // and stashed, so the project's copy differs from what was sent.
+    h.doc.setComponentParams("c1", { storage: { guid: OTHER }, programmed: true }); // prettier-ignore
+    await h.workspace.autoSaveNow();
+    const res = await duplicate(doc, images);
+    res.doc.components[0].params.storage.guid = "dddddddd-0000-0000-0000-000000000000"; // prettier-ignore
+    return res;
+  };
+  await h.workspace.duplicateTab("t1");
+  assert.equal(h.doc.getComponent("c1").params.programmed, undefined, "the copied chip's own state"); // prettier-ignore
+});
+
+test("a quit waits out a tab switch clicked during its writes' wait before it asks", async () => {
+  const h = await harness();
+  await twoDesktops(h); // on t1
+  h.doc.load(someDesign());
+  const gates = {};
+  const gate = (name) => new Promise((r) => (gates[name] = r));
+  let writing = true;
+  const onPending = (e) => writing && ((writing = false), e.detail.hold(gate("write"))); // prettier-ignore
+  const onLeave = (e) => e.detail.hold(gate("leave"));
+  window.addEventListener("chiphippo:writes-pending", onPending);
+  window.addEventListener("chiphippo:desk-leaving", onLeave);
+  try {
+    const closing = h.workspace.confirmClose();
+    await settle();
+    const switching = h.workspace.selectTab("t2"); // clicked during the wait
+    await settle();
+    gates.write();
+    await settle();
+    assert.equal(PopupManager.isOpen(), false, "not while the switch is still going"); // prettier-ignore
+    gates.leave();
+    await switching;
+    await settle();
+    assert.equal(h.workspace.activeTab.id, "t2");
+    assert.ok(findButton("Discard"), "then asked");
+    clickButton("Discard");
+    assert.equal(await closing, true);
+  } finally {
+    window.removeEventListener("chiphippo:writes-pending", onPending);
+    window.removeEventListener("chiphippo:desk-leaving", onLeave);
+  }
+});
+
+test("a ROM flagged off the desk is flagged in that desktop's undo history too: undo-then-redo keeps it", async () => {
+  const h = await harness();
+  h.doc.load(romDesk());
+  await twoDesktops(h); // on t1
+  const history = h.controller.loads.at(-1).history; // t1's
+  history.record(someDesign(), "load");
+  history.record(h.doc.snapshot(), "place"); // the present: the ROM placed
+  history.record(h.doc.snapshot(), "edit"); // E2…
+  history.undo(); // …undone: waiting in the redo future
+  const where = h.workspace.deskWhere();
+  await h.workspace.selectTab("t2");
+  const steps = history.size;
+  assert.equal(h.workspace.markRomKept(where, "c1", { edited: true }), true);
+  assert.equal(history.present.components[0].params.programmed, true, "the present entry"); // prettier-ignore
+  assert.equal(history.size, steps, "no new undo step");
+  assert.equal(history.redo().components[0].params.programmed, true, "the redo waiting, too"); // prettier-ignore
+  assert.ok(history.undo());
+  assert.ok(history.undo());
+  assert.equal(history.present.components?.length ?? 0, 0, "the past (before the ROM) left as it was"); // prettier-ignore
+});
+
+test("a quit waits for a ROM write still landing before it asks — the question is about the project as it will stand", async () => {
+  const h = await harness();
+  h.doc.load(someDesign());
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const onPending = (e) => e.detail.hold(gate);
+  window.addEventListener("chiphippo:writes-pending", onPending);
+  try {
+    const closing = h.workspace.confirmClose();
+    await settle();
+    assert.equal(PopupManager.isOpen(), false, "not asked while the write is still to land"); // prettier-ignore
+    release();
+    await settle();
+    assert.ok(findButton("Discard"), "then asked");
+    clickButton("Discard");
+    assert.equal(await closing, true);
+  } finally {
+    window.removeEventListener("chiphippo:writes-pending", onPending);
+  }
 });

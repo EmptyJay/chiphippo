@@ -40,6 +40,7 @@ import {
   coveredHoles,
   dipRows,
   flippedPin,
+  seatsWide,
 } from "./footprints.js";
 import {
   boardSize,
@@ -53,10 +54,10 @@ import {
   rotateOffset,
 } from "./breadboard.js";
 
-// A chip anchor: pin 1's hole — row e, or row d for a 600-mil part at its true
-// width (footprints.js `dipRows` says which rows a given package may take).
-const CHIP_ANCHOR_RE = /^([de])([1-9]\d*)$/;
-const GRID_ANCHOR_RE = /^([a-j])([1-9]\d*)$/; // a discrete anchors in ANY row
+// A discrete anchors in ANY row. So does a chip, as far as parsing goes: pin
+// 1's row is the seat (footprints.js `dipRows` says which rows a given package
+// may take — e, or b–e for a 600-mil part at its true width).
+const GRID_ANCHOR_RE = /^([a-j])([1-9]\d*)$/;
 // A TURNED two-terminal part (resistor / LED) anchors pin 1 in ANY hole — a
 // grid row OR a power rail — so BOTH leads can reach rails (e.g. a resistor
 // bridging two rails). The linear footprint form stays GRID_ANCHOR_RE only:
@@ -78,7 +79,7 @@ export function canCornerOffset(def) {
  * The seated hole of every pin of a board part (chip OR discrete):
  * `ref` + `anchor` → derived `[{ pin, hole }]`, or null when the ref is
  * unknown, isn't a board-seated part, or the anchor doesn't fit its
- * footprint (chips: row e, or d for a 600-mil part; discretes: any grid row).
+ * footprint (chips: row e, or b–e for a 600-mil part; discretes: any grid row).
  * Whether each hole
  * exists on a given board type is the caller's check — this is pure
  * footprint arithmetic.
@@ -92,9 +93,10 @@ export function partPinHoles(ref, anchor, params) {
   if (!def || typeof anchor !== "string") return null;
   if (def.package) {
     // DIP chip straddling the trench, at the width its anchor row says.
-    const m = CHIP_ANCHOR_RE.exec(anchor);
-    if (!m || !dipRows(def.package, m[1])) return null;
-    const seated = allPinHoles(def.package, Number(m[2]), m[1]).map(
+    const m = GRID_ANCHOR_RE.exec(anchor);
+    const wide = seatsWide(params);
+    if (!m || !dipRows(def.package, m[1], wide)) return null;
+    const seated = allPinHoles(def.package, Number(m[2]), m[1], wide).map(
       ({ pin, row, col }) => ({ pin, hole: `${row}${col}` }),
     );
     if (params?.rot !== 180) return seated;
@@ -175,19 +177,20 @@ export function partPinHoles(ref, anchor, params) {
 }
 
 /**
- * The holes a seated part's BODY stands over without a pin in them — rows e, f
- * and g under a 600-mil chip at its true width (footprints.js `coveredHoles`),
+ * The holes a seated part's BODY stands over without a pin in them — the three
+ * rows between a 600-mil chip's pins at its true width (footprints.js
+ * `coveredHoles`; `params` says whether row e is the e/i seat),
  * and nothing for any other part or seat. `[]` (never null) when there is
  * nothing to cover, an unknown ref included: a body that covers nothing claims
  * nothing.
  * @returns {string[]} hole ids on the part's own board
  */
-export function partCoverHoles(ref, anchor) {
+export function partCoverHoles(ref, anchor, params = null) {
   const def = partDef(ref);
   if (!def?.package || typeof anchor !== "string") return [];
-  const m = CHIP_ANCHOR_RE.exec(anchor);
+  const m = GRID_ANCHOR_RE.exec(anchor);
   if (!m) return [];
-  return coveredHoles(def.package, Number(m[2]), m[1]).map(
+  return coveredHoles(def.package, Number(m[2]), m[1], seatsWide(params)).map(
     ({ row, col }) => `${row}${col}`,
   );
 }
@@ -196,13 +199,13 @@ export function partCoverHoles(ref, anchor) {
  * `partCoverHoles` as DESK ADDRESSES on the part's own board — only the holes
  * that board really has.
  * @param {{ boards: Array }} doc
- * @param {{ ref:string, board:string, anchor:string }} comp
+ * @param {{ ref:string, board:string, anchor:string, params?:object }} comp
  * @returns {string[]}
  */
 export function partCoverAddresses(doc, comp) {
   const board = (doc?.boards ?? []).find((b) => b.id === comp?.board);
   if (!board) return [];
-  return partCoverHoles(comp.ref, comp.anchor)
+  return partCoverHoles(comp.ref, comp.anchor, comp.params)
     .filter((hole) => {
       try {
         return parseHole(board.type, hole) !== null;
@@ -622,7 +625,12 @@ export function canPlacePart(
     if (Math.hypot(pb.x - pa.x, pb.y - pa.y) < def.minSpan) return false;
   }
   const index = occupancy ?? buildOccupancy(doc);
-  const covered = partCoverAddresses(doc, { ref, board: boardId, anchor });
+  const covered = partCoverAddresses(doc, {
+    ref,
+    board: boardId,
+    anchor,
+    params,
+  });
   for (const address of [...pins.map((p) => p.address), ...covered]) {
     const occupant = index.get(address);
     if (occupant && occupant.componentId !== ignoreId) return false;

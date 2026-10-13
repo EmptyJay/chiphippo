@@ -68,13 +68,25 @@ if the seat is already occupied or falls off the edge of the board.
 
 The **wide chips** — the 24-, 28-, 32- and 40-pin packages: the memories, the
 6502 and its peripherals, the Z80 and the 74LS181 — are 0.6 inch across, twice
-a small chip, and seat at that true width: pin 1 in row **d**, the other row
-of pins in row **h**, six holes apart. The chip's body covers rows e, f and g
-between them, so those holes can't take a wire or another part's lead — wire
-to each pin from the rows outside it instead (a–c below, i–j above). A desk
-saved before wide chips seated this way keeps them in rows e and f just as
-they were; move one on its own and it takes its true width, bringing the wires
-you carry with **Option** out from under its body.
+a small chip, and seat at that true width, their two rows of pins six holes
+apart across the trench. There are four ways to do that, and the chip takes
+whichever is nearest the pointer as you place or drag it:
+
+| Pin 1's row | Other row | Body covers |
+|---|---|---|
+| **e** | **i** | f, g, h |
+| **d** | **h** | e, f, g |
+| **c** | **g** | d, e, f |
+| **b** | **f** | c, d, e |
+
+Every one makes the same connections — each half-column is one connected
+strip — so pick the one that leaves room for your wiring. The chip's body
+covers the three rows between its pins, so those holes can't take a wire or
+another part's lead; wire to each pin from the rows outside it instead. A
+dragged chip moves from one seat to the next as the pointer travels, wherever
+you took hold of it. A desk saved before wide chips seated this way keeps them
+in rows e and f just as they were; move one on its own and it takes its true
+width, bringing the wires you carry with **Option** out from under its body.
 
 Because a chip's footprint is the same two rows no matter how it's turned,
 placing one is a matter of picking the column — there's no click-to-rotate
@@ -197,7 +209,8 @@ loop. Only the timing chips read it (below).
 **COMPONENTS ▸ Resistors ▸ Potentiometer** is a three-pin trimmer: a
 resistive track between the two outer pins and a **wiper** on the middle pin
 that taps it. It seats along one row like a switch, pins 1, W and 3 in three
-holes side by side.
+holes side by side. Press `R` while placing it, or with it selected, to turn
+it end-for-end: pins 1 and 3 swap ends and its screw swings to the other side.
 
 Its **Properties…** card has the track's **Resistance** — picked from the
 values pots are sold in (100 Ω, 200 Ω, 500 Ω, 1 kΩ … 22 kΩ, 25 kΩ, 47 kΩ,
@@ -352,7 +365,9 @@ each a TO-220 standing over three holes in a row. A 78xx's legs are
 `IN · GND · OUT` from the left; an LM317's are `ADJ · OUT · IN`, and two
 resistors set its output — **R1** from OUT to ADJ (240 Ω is usual) and **R2**
 from ADJ to ground, for **Vout = 1.25 V × (1 + R2 / R1)**: 240 Ω and 390 Ω make
-3.3 V. Select one and press `R` to turn it end-for-end.
+3.3 V. Press `R` while placing one, or with it selected, to turn it
+end-for-end: its tab swings to the front and its legs read `OUT · GND · IN`
+(`IN · OUT · ADJ` for an LM317) from the left.
 On the standard engine a regulator's output **is a supply** — chips on it are
 powered, like chips on a rail — whenever its input is a supply at least its
 **dropout** above what it holds (2 V for a 78xx, 1.7 V for the LM317); below
@@ -366,7 +381,9 @@ of a Songle SRD — over five holes in a row: **COIL+**, **COIL−**, **COM**,
 engine COM is joined to **NO** while one coil leg is HIGH and the other LOW,
 and to **NC** otherwise; its lamp lights while it is pulled in. A real coil
 wants about 70 mA at 5 V — more than a logic output gives — so drive it from a
-transistor or a ULN2003A, with a diode across the coil.
+transistor or a ULN2003A, with a diode across the coil. Press `R` while
+placing it, or with it selected, to turn it end-for-end: the cube swings to
+the other side of its row, `NC` now at the left.
 
 **The electronic load** (**COMPONENTS ▸ Power**) is a bench brick like the
 power supply, with a red **`+`** and a black **`−`**: wire them across a
@@ -438,10 +455,12 @@ part is placed, select it and press `R` to rotate it 90° at a time — pin 1
 stays put and pin 2's lead swings around it, hunting for the next free hole
 to land in.
 
-**Transistors (`R` while selected, or while placing).** A transistor turns
-end-for-end in place, as the bussed resistor array does: the same three
-holes, with the pin order reversed (`E B C` becomes `C B E`), which is how
-its letters read on its face.
+**Transistors, regulators, potentiometers and relays (`R` while selected, or
+while placing).** These turn end-for-end in place, as the bussed resistor array
+does: the same holes, with the pin order reversed (`E B C` becomes `C B E`).
+The body turns with them — a TO-92's flat face, a TO-220's tab, a trimmer's
+screw and a relay's cube all swing to the other side of the row — while the
+printing on it stays the right way up.
 
 **Oscillator cans (`R`, but the exact step differs by state).** A can spins
 around its own centre, not around one pin, and the step size changes

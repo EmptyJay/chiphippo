@@ -578,8 +578,8 @@ export function buildRouteSpace(doc, opts = {}) {
  *
  * Stating it as "contains the endpoint" rather than "the wire is attached to
  * this part" is what keeps it tight. A chip's slab stops half a pitch short of
- * its pin rows (e and f, or d and h for a 600-mil part at its true width — whose
- * covered rows e–g between them no wire may use at all), so a wire on that
+ * its pin rows (e and f, or the pair six pitches apart a 600-mil part takes at
+ * its true width — whose covered rows between them no wire may use at all), so a wire on that
  * chip's node attaches OUTSIDE the body and the chip is not exempt — which is the whole point, since a blanket
  * attached-to-it exemption would let a wire leaving pin 3 fly straight across
  * the chip it just left.

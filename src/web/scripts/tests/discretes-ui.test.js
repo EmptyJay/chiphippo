@@ -226,8 +226,16 @@ test("a label beside a part stays upright: below it across, beside it upright", 
 
 test("a transistor's face: its part number (or type) and pin letters, turned with it", () => {
   resetDom();
+  // Left to right AS SEEN: a turned part's body turns a half lap about its
+  // middle hole (x 1), which carries each letter over to its pin.
   const pins = (svg) =>
-    [...svg.querySelectorAll(".part-transistor-pin")].map((t) => t.textContent);
+    [...svg.querySelectorAll(".part-transistor-pin")]
+      .map((t) => {
+        const x = Number(t.getAttribute("x"));
+        return { x: t.closest(".part-discrete-turned") ? 2 - x : x, name: t.textContent }; // prettier-ignore
+      })
+      .sort((a, b) => a.x - b.x)
+      .map((p) => p.name);
   const label = (svg) =>
     svg.querySelector(".part-transistor-label").textContent;
   assert.deepEqual(pins(buildDiscreteSvg("npn")), ["E", "B", "C"]);
@@ -239,6 +247,48 @@ test("a transistor's face: its part number (or type) and pin letters, turned wit
   assert.equal(label(buildDiscreteSvg("npn", { partNumber: "2N2222" })), "2N2222"); // prettier-ignore
   assert.ok(buildDiscreteSvg("npn").querySelector(".part-transistor-lamp"));
   assert.ok(buildDiscreteSvg("nmos").querySelector(".part-transistor-lamp"));
+});
+
+test("a turned transistor, regulator, pot or relay turns its BODY a half lap, its words kept upright", () => {
+  resetDom();
+  for (const [ref, params, pivot] of [
+    ["npn", {}, 1],
+    ["nmos", {}, 1], // a TO-220: its tab swings to the front
+    ["LM7805", {}, 1], // so does a regulator's
+    ["LM317", {}, 1],
+    ["pot", {}, 1],
+    ["relay", {}, 2],
+  ]) {
+    const flat = buildDiscreteSvg(ref, params);
+    const turned = buildDiscreteSvg(ref, { ...params, rot: 180 });
+    const group = turned.querySelector(".part-discrete-turned");
+    assert.ok(group, `${ref}: the body turns`);
+    assert.equal(group.getAttribute("transform"), `rotate(180 ${pivot} 0)`);
+    assert.equal(flat.querySelector(".part-discrete-turned"), null);
+    // Every word turned back about its own middle, so it reads upright.
+    for (const text of group.querySelectorAll("text")) {
+      assert.match(text.getAttribute("transform") ?? "", /^rotate\(180 /, `${ref}: "${text.textContent}" upright`); // prettier-ignore
+    }
+    // The drawing's box is its unturned one mirrored about the pivot.
+    const box = (svg) => svg.getAttribute("viewBox").split(" ").map(Number);
+    const [x0, y0, w, h] = box(flat);
+    const [x1, y1, w1, h1] = box(turned);
+    assert.deepEqual([w1, h1], [w, h], `${ref}: same size`);
+    assert.ok(Math.abs(x1 - (2 * pivot - (x0 + w))) < 1e-9, `${ref}: x mirrored`); // prettier-ignore
+    assert.ok(Math.abs(y1 - -(y0 + h)) < 1e-9, `${ref}: y mirrored`);
+  }
+  // A turned regulator's leg letters read O G I from the front, left to right
+  // as they sit: each letter's x, turned about the middle leg.
+  const marks = (svg) =>
+    [...svg.querySelectorAll(".part-transistor-pin")]
+      .map((t) => {
+        const x = Number(t.getAttribute("x"));
+        return { x: t.closest(".part-discrete-turned") ? 2 - x : x, mark: t.textContent }; // prettier-ignore
+      })
+      .sort((a, b) => a.x - b.x)
+      .map((m) => m.mark);
+  assert.deepEqual(marks(buildDiscreteSvg("LM7805")), ["I", "G", "O"]);
+  assert.deepEqual(marks(buildDiscreteSvg("LM7805", { rot: 180 })), ["O", "G", "I"]); // prettier-ignore
 });
 
 test("a MOSFET draws as the package it is set to: a TO-220, or a TO-92", () => {
