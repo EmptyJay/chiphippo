@@ -728,7 +728,7 @@ test("psu: volts enum, source contract, integer terminal offsets", () => {
 
 test("clock: hz enum (+manual), isAuto contract, Properties field", () => {
   const def = partDef("clock");
-  assert.deepEqual(CLOCK_HZ, [1, 2, 5, 10, 20, 50, 100, 250, 500, 1000, "manual"]); // prettier-ignore
+  assert.deepEqual(CLOCK_HZ, [1, 2, 5, 10, 20, 50, 60, 100, 250, 500, 1000, "manual"]); // prettier-ignore
   assert.equal(hzLabel(250), "250 Hz");
   assert.equal(hzLabel(1000), "1 kHz");
   assert.deepEqual(def.normalizeParams({}), { hz: 1 });
@@ -777,6 +777,7 @@ test("clock: hz enum (+manual), isAuto contract, Properties field", () => {
           { value: 10, label: "10 Hz" },
           { value: 20, label: "20 Hz" },
           { value: 50, label: "50 Hz" },
+          { value: 60, label: "60 Hz" },
           { value: 100, label: "100 Hz" },
           { value: 250, label: "250 Hz" },
           { value: 500, label: "500 Hz" },

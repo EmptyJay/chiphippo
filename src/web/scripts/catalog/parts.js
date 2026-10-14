@@ -83,14 +83,14 @@ const ampsLabel = (amps) =>
   amps < 1 ? `${Math.round(amps * 1000)} mA` : `${amps} A`;
 /** Clock rates (Hz) plus click-to-toggle "manual"; the timing lives in the
     renderer's SimController — the def carries only the pure contract. A 1-2-5
-    ladder up two decades, then 250 Hz, 500 Hz and 1 kHz: the slow end is for
-    watching an edge land, the fast end for letting a counter or a CPU actually
-    get somewhere. SimController runs edges in BATCHES between frames
-    (features/done/batched-ticks.md), so no timer caps the rate — a desk too
-    busy to keep up runs slower and its speed button SAYS so. 1 kHz was dropped
-    once (2026-10-09, few desks kept up with it) and restored with 500 Hz
-    (2026-10-10). A desk saved at a rate not offered — faster than the top —
-    runs at the fastest that is (`offeredHz`). */
+    ladder up two decades with 60 Hz (mains) in it, then 250 Hz, 500 Hz and
+    1 kHz: the slow end is for watching an edge land, the fast end for letting a
+    counter or a CPU actually get somewhere. SimController runs edges in
+    BATCHES between frames (features/done/batched-ticks.md), so no timer caps
+    the rate — a desk too busy to keep up runs slower and its speed button SAYS
+    so. 1 kHz was dropped once (2026-10-09, few desks kept up with it) and
+    restored with 500 Hz (2026-10-10). A desk saved at a rate not offered —
+    faster than the top — runs at the fastest that is (`offeredHz`). */
 export const CLOCK_HZ = Object.freeze([
   1,
   2,
@@ -98,6 +98,7 @@ export const CLOCK_HZ = Object.freeze([
   10,
   20,
   50,
+  60,
   100,
   250,
   500,

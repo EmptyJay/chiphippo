@@ -213,7 +213,7 @@ Every part has Name and Description fields. Discretes also take an optional part
 - **Oscillator cans.** Full and half size, 1 Hz–1 kHz, chip-powered.
 - **Power bricks** (desk-level, not seated)
   - **PSU:** 3, 5, 9, 12 or 15 V. Above 5 V damages 74LS chips. The current limit (100 mA–5 A) matters under Spice Lite.
-  - **Clock:** 1, 2, 5, 10, 20, 50, 100, 250 Hz, 1 kHz, or Manual (click to toggle). It must itself be powered.
+  - **Clock:** 1, 2, 5, 10, 20, 50, 60, 100, 250, 500 Hz, 1 kHz, or Manual (click to toggle). It must itself be powered.
 - **Annotations:** Label (one line) and Note (multi-line). They can anchor to a part and ride with it, and they are invisible to the electrical model.
 - **Signals** (§10) and **Arduino Output/Input tags** (§11).
 
