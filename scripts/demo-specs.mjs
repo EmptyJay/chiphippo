@@ -1128,6 +1128,34 @@ export const DEMOS = Object.freeze([
     },
   },
 
+  {
+    ref: "74LS92",
+    title: "Divide-by-twelve (÷12) ripple counter",
+    note:
+      "74LS92 — Divide-by-twelve counter\n" +
+      "A ÷2 on QA and a ÷6 on QB–QD. Wire QA\n" +
+      "into CKB — the blue jumper — for the ÷12.\n" +
+      "The ÷6 is not binary: the count runs 0–5,\n" +
+      "then 8–13, and QD is a square wave at a\n" +
+      "twelfth of the clock. RESET forces 0.",
+    inputs: [{ label: "RESET", pins: [6] }],
+    defaults: [false], // counting
+    links: [[12, 1]], // QA → CKB: the ripple that makes it a ÷12
+    ties: [{ pins: [7], rail: "+" }], // R0(2) high, so RESET alone gates the reset
+    clock: { hz: 2, pins: [14] }, // CKA
+    leds: [
+      { pin: 12, label: "QA", color: "green" },
+      { pin: 11, label: "QB", color: "green" },
+      { pin: 9, label: "QC", color: "green" },
+      { pin: 8, label: "QD", color: "green" },
+    ],
+    sequential: {
+      // Falling-edge, like the '90; the sheet's sequence skips 6, 7, 14, 15.
+      expect: (edges) =>
+        bitsOf([0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13][(edges - 1) % 12], 4),
+    },
+  },
+
   // ── Shift register ─────────────────────────────────────────────────────
   {
     ref: "74LS164",

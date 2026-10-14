@@ -163,6 +163,7 @@ const LIBRARIES = Object.freeze([
       "74LS73": "sn74ls73a.pdf",
       "74LS75": "sn74ls75.pdf",
       "74LS90": "sn74ls90.pdf",
+      "74LS92": "sn74ls90.pdf", // SDLS940A covers the '90, '92 and '93
       "74LS107": "sn74ls107a.pdf",
       "74LS153": "sn74ls153.pdf",
       "74LS164": "sn74ls164.pdf",

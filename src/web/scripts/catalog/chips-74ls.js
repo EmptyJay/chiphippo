@@ -23,8 +23,8 @@
 // family builders in sim/sequential.js) — never per-chip evaluator code. Where
 // the batch needed shapes the vocabulary lacked (single-clock up/down counter,
 // tri-state register/latch, addressable latch, SR latch, 595 shift+storage,
-// decade counter, inverting/tri-state bus drivers), the builder was ADDED to
-// sequential.js and this file only supplies pin maps.
+// two-section ripple counter, inverting/tri-state bus drivers), the builder
+// was ADDED to sequential.js and this file only supplies pin maps.
 //
 // Schottky vs plain TTL is an analog speed/power distinction the zero-delay,
 // power-agnostic engine doesn't model, so a 74LSxx behaves identically to its
@@ -50,7 +50,7 @@ import {
   addressableLatch8,
   srLatchUnit,
   shiftRegister595,
-  decadeCounter7490,
+  twoSectionCounter,
 } from "../sim/sequential.js";
 import { input, output, io, nc, gnd, vcc, unit, buf3 } from "./pin-builders.js";
 
@@ -1253,7 +1253,7 @@ export const CHIPS_74LS = Object.freeze([
       nc(13),
       input(14, "CKA"),
     ],
-    logic: decadeCounter7490({
+    logic: twoSectionCounter({
       cka: 14,
       ckb: 1,
       r0: [2, 3],
@@ -1262,6 +1262,48 @@ export const CHIPS_74LS = Object.freeze([
       qb: 9,
       qc: 8,
       qd: 11,
+      codes: [0, 1, 2, 3, 4], // ÷5, binary
+    }),
+  },
+  {
+    id: "74LS92",
+    title: "Divide-by-twelve (÷12) ripple counter",
+    blurb:
+      "Divide-by-twelve counter built from a ÷2 section (CKA→QA) and a ÷6 " +
+      "section (CKB→QB,QC,QD), both falling-edge, with a gated reset-to-zero " +
+      "(R0). The ÷6 is a ÷3 on QB/QC that toggles QD, so it counts 0, 1, 2, " +
+      "4, 5, 6. Wire QA→CKB for the ÷12: QD is then a square wave at a " +
+      "twelfth of the clock. Non-standard power pins.",
+    group: "Counter",
+    package: "DIP-14",
+    // TI SDLS940A, the '90's sheet too: no set-to-nine, so pins 2–4 are NC
+    // and R0 moves to 6/7; the outputs take a different order from the '90's.
+    pins: [
+      input(1, "CKB"),
+      nc(2),
+      nc(3),
+      nc(4),
+      vcc(5),
+      input(6, "R0(1)"),
+      input(7, "R0(2)"),
+      output(8, "QD"),
+      output(9, "QC"),
+      gnd(10),
+      output(11, "QB"),
+      output(12, "QA"),
+      nc(13),
+      input(14, "CKA"),
+    ],
+    logic: twoSectionCounter({
+      cka: 14,
+      ckb: 1,
+      r0: [6, 7],
+      qa: 12,
+      qb: 11,
+      qc: 9,
+      qd: 8,
+      // QD QC QB: 000 001 010 100 101 110 — the sheet's count sequence.
+      codes: [0b000, 0b001, 0b010, 0b100, 0b101, 0b110],
     }),
   },
 ]);

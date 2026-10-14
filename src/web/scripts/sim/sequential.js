@@ -1077,34 +1077,43 @@ export function shiftRegister595(m) {
 }
 
 /**
- * Decade (÷10) ripple counter (7490-style): two independent sections — a ÷2
- * stage (`qa`, clocked on the falling edge of `cka`) and a ÷5 stage
- * (`qb`/`qc`/`qd`, clocked on the falling edge of `ckb`). Async gated resets:
- * `r0` = both R0 inputs HIGH → 0; `r9` = both R9 inputs HIGH → 9 (priority).
- * Wire QA→CKB externally for a BCD decade count.
- * @param {{cka,ckb,r0:number[],r9:number[],qa,qb,qc,qd}} m
+ * Two-section ripple counter (the 7490/7492 family): two independent
+ * sections — a ÷2 stage (`qa`, clocked on the falling edge of `cka`) and a
+ * stage clocked on the falling edge of `ckb` that steps `qb`/`qc`/`qd`
+ * through `codes`, each code those three outputs as bits, `qb` the low one.
+ * The 7490's ÷5 counts 0…4 in binary; the 7492's ÷6 is a ÷3 on QB/QC whose
+ * QC falling toggles QD, so it runs 0, 1, 2, 4, 5, 6. Async gated resets:
+ * `r0` = every R0 input HIGH → 0; `r9`, on a part that has it, = every R9
+ * input HIGH → QA set and the second stage on its LAST code (the 7490's
+ * 1001 = 9), beating `r0`. Wire QA→CKB externally for the full count.
+ * @param {{cka,ckb,r0:number[],r9?:number[],qa,qb,qc,qd,codes:number[]}} m
  */
-export function decadeCounter7490(m) {
-  const reset9 = (ins) => m.r9.every((p) => ins.get(p) === H);
+export function twoSectionCounter(m) {
+  const last = m.codes.length - 1;
+  const reset9 = (ins) => m.r9 != null && m.r9.every((p) => ins.get(p) === H);
   const reset0 = (ins) => m.r0.every((p) => ins.get(p) === H);
   return {
-    state0: () => ({ a: L, v: 0 }), // a = QA; v = the ÷5 stage's 0…4 count
+    state0: () => ({ a: L, v: 0 }), // a = QA; v = the second stage's place in `codes`
     step(s, ins, prev) {
-      if (reset9(ins)) return { a: H, v: 4 }; // 1001 = 9 (QD QC QB QA)
+      if (reset9(ins)) return { a: H, v: last };
       if (reset0(ins)) return { a: L, v: 0 };
       let a = s.a;
       let v = s.v;
       if (prev && edgeFell(prev.get(m.cka), ins.get(m.cka))) a = inv(a);
-      if (prev && edgeFell(prev.get(m.ckb), ins.get(m.ckb))) v = (v + 1) % 5;
+      if (prev && edgeFell(prev.get(m.ckb), ins.get(m.ckb))) {
+        v = (v + 1) % m.codes.length;
+      }
       return { a, v };
     },
-    outputs: (s) =>
-      new Map([
+    outputs(s) {
+      const code = m.codes[s.v];
+      return new Map([
         [m.qa, s.a],
-        [m.qb, s.v & 1 ? H : L],
-        [m.qc, (s.v >> 1) & 1 ? H : L],
-        [m.qd, (s.v >> 2) & 1 ? H : L],
-      ]),
+        [m.qb, code & 1 ? H : L],
+        [m.qc, (code >> 1) & 1 ? H : L],
+        [m.qd, (code >> 2) & 1 ? H : L],
+      ]);
+    },
   };
 }
 

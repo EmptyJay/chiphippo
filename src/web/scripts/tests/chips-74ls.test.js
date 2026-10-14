@@ -728,3 +728,38 @@ test("74LS90: ÷2 section on QA; gated reset-to-0 and set-to-9", () => {
     [H, L, L, H], // QA QB QC QD = 1001 = 9
   );
 });
+
+test("74LS92: ÷6 section counts 0,1,2,4,5,6; gated reset-to-0; no set-to-9", () => {
+  const def = chipDef("74LS92");
+  // CKA=14→QA(12) ; CKB=1→QB(11),QC(9),QD(8) ; R0=6,7. Falling edge.
+  const run = { 6: L, 7: L };
+  const high = (out) =>
+    (out.get(11) === H ? 1 : 0) + // QB
+    (out.get(9) === H ? 2 : 0) + // QC
+    (out.get(8) === H ? 4 : 0); // QD
+  let r = { state: def.logic.state0() };
+  const seen = [];
+  for (let i = 0; i < 7; i++) {
+    r = pulse(def, r.state, run, 1, false); // CKB falling
+    seen.push(high(r.out));
+  }
+  // SDLS940A's count sequence: QD QC QB never reads 011 or 111.
+  assert.deepEqual(seen, [1, 2, 4, 5, 6, 0, 1]);
+  // The ÷2 section is the '90's: one CKA fall toggles QA.
+  r = pulse(def, def.logic.state0(), run, 14, false);
+  assert.equal(r.out.get(12), H);
+  // R0(1)&R0(2) high clears both sections at once.
+  const cleared = step(def, r.state, { 6: H, 7: H });
+  const o0 = outs(def, cleared, { 6: H, 7: H });
+  assert.deepEqual(
+    [o0.get(12), o0.get(11), o0.get(9), o0.get(8)],
+    [L, L, L, L],
+  );
+  // One R0 input high is not a reset (the gate is an AND).
+  r = pulse(def, def.logic.state0(), { 6: H, 7: L }, 14, false);
+  assert.equal(r.out.get(12), H);
+  // Pins 2–4 are NC — the R9 inputs the '90 has there are gone.
+  for (const n of [2, 3, 4, 13]) {
+    assert.equal(def.pins.find((p) => p.n === n).role, "nc");
+  }
+});

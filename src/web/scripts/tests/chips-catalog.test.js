@@ -108,6 +108,7 @@ const LS_WAVE = [
   "74LS573",
   "74LS595",
   "74LS90",
+  "74LS92",
 ];
 // The memory wave (Feature 170): ROM / SRAM / EEPROM on the wide DIP packages.
 const MEM_WAVE = [

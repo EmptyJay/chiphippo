@@ -607,6 +607,9 @@
     "74LS90": {
       "title": "Dekadenzähler (÷10), asynchron"
     },
+    "74LS92": {
+      "title": "Zwölferteiler (÷12), asynchron"
+    },
     "rom-8k": {
       "title": "8K×8-ROM"
     },

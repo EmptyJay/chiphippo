@@ -87,12 +87,12 @@ test("the part catalog carries the Feature 60 inventory", () => {
   assert.ok(partDef("clock"));
   assert.ok(partDef("lcd16x2"));
   assert.equal(chipDef("sw-slide"), null);
-  // 114 chips (24 + 28 LS + 46 CD4000 + 7 memory + 2 io + 2 cpu + the 555
+  // 115 chips (24 + 29 LS + 46 CD4000 + 7 memory + 2 io + 2 cpu + the 555
   // + the bench parts' LM358, ULN2003A, 4N35 and PC817) + 38 parts (the
   // discretes brought 7: two diodes, an inductor and four transistors; the
   // bench parts 7: five regulators, the relay and the electronic load; and
   // the speaker)
-  assert.equal(PALETTE_DEFS.length, 152);
+  assert.equal(PALETTE_DEFS.length, 153);
 });
 
 for (const def of PART_DEFS.filter((d) => d.kind === "discrete")) {

@@ -107,6 +107,7 @@ export const DIGITAL_ELEMENTS = Object.freeze([
 export const DIGITAL_UNSUPPORTED = Object.freeze({
   "74LS73": "noDigitalModel",
   "74LS75": "noDigitalModel",
+  "74LS92": "noDigitalModel", // its counter folder has the 7490 and 7493 only
   "74LS169": "noDigitalModel",
   "74LS240": "noDigitalModel",
   "74LS259": "noDigitalModel",

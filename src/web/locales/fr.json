@@ -608,6 +608,9 @@
     "74LS90": {
       "title": "Compteur décimal (÷10) asynchrone"
     },
+    "74LS92": {
+      "title": "Compteur diviseur par douze (÷12) asynchrone"
+    },
     "rom-8k": {
       "title": "ROM 8K×8"
     },

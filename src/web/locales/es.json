@@ -608,6 +608,9 @@
     "74LS90": {
       "title": "Contador de década (÷10) asíncrono"
     },
+    "74LS92": {
+      "title": "Contador divisor por doce (÷12) asíncrono"
+    },
     "rom-8k": {
       "title": "ROM de 8K×8"
     },

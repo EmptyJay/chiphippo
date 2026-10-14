@@ -607,6 +607,9 @@
     "74LS90": {
       "title": "Decade (÷10) ripple counter"
     },
+    "74LS92": {
+      "title": "Divide-by-twelve (÷12) ripple counter"
+    },
     "rom-8k": {
       "title": "8K×8 ROM"
     },

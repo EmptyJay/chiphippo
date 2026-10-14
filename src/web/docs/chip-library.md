@@ -97,6 +97,7 @@ GND on the package corners, and neither do these.
 | Part | Description |
 | --- | --- |
 | `74LS90` | Decade (÷10) ripple counter |
+| `74LS92` | Divide-by-twelve (÷12) ripple counter |
 | `74LS161` | Synchronous 4-bit binary counter |
 | `74LS169` | Synchronous 4-bit up/down counter |
 | `74LS193` | Synchronous up/down 4-bit counter |

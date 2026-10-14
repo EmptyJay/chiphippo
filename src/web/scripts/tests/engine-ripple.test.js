@@ -179,6 +179,45 @@ test("a 74LS90 wired QA→CKB counts 0→9 and rolls over on CKA falls", () => {
   }
 });
 
+// ── 74LS92 divide-by-twelve (QA→CKB): the ÷6 skips 6–7 and 14–15 ─────────────
+
+test("a 74LS92 wired QA→CKB counts the ÷12 sequence; QD is a twelfth of the clock", () => {
+  const h = holesOf("74LS92", "e10");
+  const doc = {
+    boards,
+    components: [
+      psu("psu1", 80),
+      clock("clk1", 90),
+      chip("c1", "74LS92", "e10"),
+    ],
+    wires: [
+      ...power("psu1", h, 5, 10), // VCC=5, GND=10 (non-standard power pins)
+      wire("clk1.out", strip(h, 14, 0)), // clock → CKA
+      wire(strip(h, 12, 0), strip(h, 1, 0)), // QA → CKB (the ripple feedback)
+      wire(strip(h, 6, 0), LO(3)), // R0(1) → GND  (reset inactive)
+      wire(strip(h, 7, 0), LO(4)), // R0(2) → GND
+    ],
+  };
+  const bench = new Harness(doc);
+  const count = () =>
+    (bench.pin(h, 12) === H ? 1 : 0) + // QA
+    (bench.pin(h, 11) === H ? 2 : 0) + // QB
+    (bench.pin(h, 9) === H ? 4 : 0) + // QC
+    (bench.pin(h, 8) === H ? 8 : 0); // QD
+  bench.tick(); // settle the power-up state
+  assert.equal(count(), 0, "starts at 0");
+  // SDLS940A's '92 count sequence (QD QC QB QA), then round again.
+  const expected = [1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 0, 1];
+  const qd = [];
+  for (let i = 0; i < expected.length; i++) {
+    bench.fall("clk1");
+    assert.equal(count(), expected[i], `after CKA fall ${i + 1}`);
+    qd.push(bench.pin(h, 8));
+  }
+  // QD is HIGH for six counts of every twelve: a square wave at f/12.
+  assert.equal(qd.slice(0, 12).filter((lv) => lv === H).length, 6);
+});
+
 // ── 74LS107 two-bit ripple counter (Q0→CLK1): output→clock within one tick ────
 
 test("a 74LS107 ripple pair (Q0→2CLK) counts 0,1,2,3 and rolls over", () => {

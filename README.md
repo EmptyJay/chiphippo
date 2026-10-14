@@ -39,7 +39,7 @@ with its siblings [Rest Hippo](https://github.com/jfigge/resthippo) and Port Hip
   600-mil DIP seats at its true width. Every tie point, rail hole, and component
   terminal is individually addressable (`bb1.f12`, `psu1.+`), so chip pins and
   wire ends bind to real holes.
-- **110 chips in two logic families** — **52 74LS** parts (gates, open-collector
+- **115 chips in two logic families** — **53 74LS** parts (gates, open-collector
   and Schmitt parts, buffers and transceivers, flip-flops, latches, counters,
   shift registers, decoders, an encoder, multiplexers, a comparator, adders and
   the '181 ALU); **46 CD4000B** parts (gates, Schmitt triggers, level shifters,
